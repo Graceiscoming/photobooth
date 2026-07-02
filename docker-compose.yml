@@ -1,0 +1,12 @@
+services:
+  photobooth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: y2k-photobooth
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./server/gallery:/app/server/gallery
+      - ./server/access.log:/app/server/access.log
+    restart: unless-stopped

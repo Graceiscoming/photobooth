@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+  --font-heading: "Space Grotesk", sans-serif;
+  --font-mono: "Space Mono", monospace;
+
+  /* Comfortable Warm Cream/Ivory Theme Colors */
+  --color-warm-bg: #fefcf8;
+  --color-warm-bg-alt: #f6f3e8;
+  --color-warm-grid: rgba(160, 140, 100, 0.05);
+  --color-warm-primary: #1c1917;
+  --color-warm-secondary: #706a60;
+  --color-warm-border: #e8e4d5;
+  --color-warm-border-dark: #1c1917;
+}
+
+/* Custom global styles */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-warm-bg);
+  font-family: var(--font-sans);
+  color: var(--color-warm-primary);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}
+
+/* Minimalist warm grid background */
+.warm-grid-bg {
+  background-color: #fefcf8;
+  background-image: 
+    linear-gradient(to right, var(--color-warm-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-warm-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Soft Scanlines */
+.scanlines {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(28, 25, 23, 0.03) 2px,
+    rgba(28, 25, 23, 0.03) 4px
+  );
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(28, 25, 23, 0.08);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(28, 25, 23, 0.15);
+}
+
+/* Custom Neo-brutalism / Minimalist shadows */
+.card-shadow {
+  box-shadow: 4px 4px 0px 0px rgba(28, 25, 23, 0.05);
+}
+
+.button-shadow {
+  box-shadow: 3px 3px 0px 0px rgba(28, 25, 23, 1);
+}
+.button-shadow:active {
+  box-shadow: 0px 0px 0px 0px rgba(28, 25, 23, 1);
+  transform: translate(3px, 3px);
+}

@@ -1,0 +1,11 @@
+client/node_modules
+client/dist
+server/node_modules
+server/gallery
+server/access.log
+.git
+Dockerfile
+docker-compose.yml
+.idea
+.vscode
+*.md

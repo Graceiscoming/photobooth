@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access Denied - Security Honeypot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #faf7f0;
+      color: #1c1917;
+      font-family: 'Space Grotesk', sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+    }
+    .container {
+      max-width: 500px;
+      border: 3px solid #1c1917;
+      background: white;
+      padding: 40px 30px;
+      border-radius: 20px;
+      box-shadow: 6px 6px 0px 0px rgba(28,25,23,1);
+    }
+    img {
+      width: 180px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 32px;
+      margin: 10px 0;
+      font-weight: 800;
+    }
+    p {
+      color: #706a60;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .badge {
+      display: inline-block;
+      background-color: #fca5a5;
+      color: #7f1d1d;
+      border: 1.5px solid #7f1d1d;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: monospace;
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 25px;
+      background: #1c1917;
+      color: white;
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-weight: bold;
+      font-size: 14px;
+      border: 2px solid #1c1917;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      background: white;
+      color: #1c1917;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="badge">🚨 [⚠️ SECURITY WARN] RECORDED</div>
+    <img src="meme.svg" alt="Meme Cat">
+    <h1>แอบส่องแกลเลอรีเหรอจ๊ะ? 🐈</h1>
+    <p>
+      ระบบตรวจพบการเข้าถึงโดยไม่ได้รับอนุญาต! หมายเลข IP ของคุณและประวัติกิจกรรมได้ถูกเขียนลงในระบบรักษาความปลอดภัยเรียบร้อยแล้ว
+    </p>
+    <a href="/" class="btn">กลับหน้าหลักดีกว่า →</a>
+  </div>
+</body>
+</html>

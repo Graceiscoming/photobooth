@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Camera, 
-  Wifi, 
-  WifiOff, 
-  Terminal, 
-  ArrowRight, 
-  ArrowLeft, 
-  Check, 
-  Settings, 
+import {
+  Camera,
+  Wifi,
+  WifiOff,
+  Terminal,
+  ArrowRight,
+  ArrowLeft,
+  Check,
+  Settings,
   X
 } from 'lucide-react';
 
@@ -16,19 +16,83 @@ export default function App() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [groupName, setGroupName] = useState('');
   const [selectedLayout, setSelectedLayout] = useState<'4cut' | '2x2' | 'polaroid'>('4cut');
-  
+
   // System diagnostic panel states
   const [backendStatus, setBackendStatus] = useState<'loading' | 'online' | 'offline'>('loading');
   const [systemInfo, setSystemInfo] = useState<any>(null);
   const [showSystemPanel, setShowSystemPanel] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [logs, setLogs] = useState<string[]>([
     'System initialized in Minimal Warm mode.',
     'Docker connection ready.'
   ]);
 
+  // DevTools & Right-click protection script
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Disable F12
+      if (e.key === 'F12') {
+        e.preventDefault();
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      // Disable Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C (Inspect elements)
+      if (isCmdOrCtrl && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C' || e.key === 'i' || e.key === 'j' || e.key === 'c')) {
+        e.preventDefault();
+        return;
+      }
+
+      // Disable Ctrl+U (View Source)
+      if (isCmdOrCtrl && (e.key === 'u' || e.key === 'U')) {
+        e.preventDefault();
+        return;
+      }
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Admin Token configuration
+  useEffect(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    const urlToken = queryParams.get('token');
+
+    if (urlToken) {
+      localStorage.setItem('adminToken', urlToken);
+      setIsAdmin(true);
+      // Clear token query parameter from browser address bar
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+      addLog('Admin authorization token registered successfully.');
+    } else {
+      const savedToken = localStorage.getItem('adminToken');
+      if (savedToken) {
+        setIsAdmin(true);
+      }
+    }
+  }, []);
+
   const checkHealth = async () => {
     try {
-      const response = await fetch('/api/health');
+      const token = localStorage.getItem('adminToken') || '';
+      const response = await fetch(`/api/health?token=${token}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (response.ok) {
         const data = await response.json();
         setBackendStatus('online');
@@ -53,13 +117,41 @@ export default function App() {
     setLogs(prev => [`[${time}] ${message}`, ...prev.slice(0, 9)]);
   };
 
-  const handleNextStep1 = () => {
+  const startSession = async () => {
     if (!groupName.trim()) {
       alert('กรุณากรอกชื่อกลุ่มหรือชื่องานเพื่อระบุการสร้างโฟลเดอร์ภาพถ่าย');
       return;
     }
-    addLog(`Group configured: "${groupName}"`);
-    setStep(2);
+
+    const cleanGroupName = groupName.trim().replace(/[^a-zA-Z0-9_]/g, '_');
+    addLog(`Requesting server directory creation for "${cleanGroupName}"...`);
+
+    try {
+      const token = localStorage.getItem('adminToken') || '';
+      const response = await fetch('/api/session/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          groupName: cleanGroupName,
+          layout: selectedLayout
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        addLog(`Session directory created: ${data.folderName}`);
+        setStep(2);
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Server authentication failed');
+      }
+    } catch (error: any) {
+      addLog(`Fallback: Using Standalone mode. (Error: ${error.message || 'Server Offline'})`);
+      setStep(2);
+    }
   };
 
   const handleNextStep2 = () => {
@@ -69,7 +161,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen warm-grid-bg text-stone-900 flex flex-col justify-between p-4 sm:p-6 md:p-8 relative overflow-hidden font-sans">
-      
+
       {/* Top Navbar */}
       <header className="w-full max-w-5xl mx-auto flex justify-between items-center z-10 py-3 border-b border-stone-200/50">
         <div className="flex items-center gap-3">
@@ -85,20 +177,21 @@ export default function App() {
         <div className="flex items-center gap-3">
           {/* Status Badge */}
           <div className="flex items-center gap-2 px-3.5 py-2 rounded-full border border-stone-200 bg-white/90 text-xs font-mono font-bold">
-            <span className={`w-2.5 h-2.5 rounded-full ${
-              backendStatus === 'online' ? 'bg-emerald-500 animate-pulse' : backendStatus === 'offline' ? 'bg-stone-400' : 'bg-amber-400 animate-pulse'
-            }`} />
+            <span className={`w-2.5 h-2.5 rounded-full ${backendStatus === 'online' ? 'bg-emerald-500 animate-pulse' : backendStatus === 'offline' ? 'bg-stone-400' : 'bg-amber-400 animate-pulse'
+              }`} />
             <span>{backendStatus === 'online' ? 'ONLINE' : 'OFFLINE'}</span>
           </div>
 
-          {/* Toggle System Drawer */}
-          <button 
-            onClick={() => setShowSystemPanel(true)}
-            className="p-3 rounded border border-stone-200 bg-white/90 hover:bg-stone-50 active:scale-95 transition-all text-stone-600 hover:text-stone-900 cursor-pointer"
-            title="System Diagnostics"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          {/* Toggle System Drawer (Only visible/useful when Admin Mode is verified) */}
+          {isAdmin && (
+            <button
+              onClick={() => setShowSystemPanel(true)}
+              className="p-3 rounded border border-stone-200 bg-white/90 hover:bg-stone-50 active:scale-95 transition-all text-stone-600 hover:text-stone-900 cursor-pointer"
+              title="System Diagnostics"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -125,18 +218,18 @@ export default function App() {
               <div className="w-full bg-white border-2 border-stone-900 rounded-3xl p-6 sm:p-10 card-shadow flex flex-col gap-6">
                 <div className="flex flex-col gap-2.5">
                   <label className="text-xs sm:text-sm font-mono font-bold tracking-wider text-stone-400 uppercase">ชื่อกลุ่ม / ชื่องาน</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={groupName}
                     onChange={(e) => setGroupName(e.target.value)}
                     placeholder="เช่น Grace_is_coming"
                     className="w-full border-2 border-stone-200 focus:border-stone-950 rounded-2xl px-5 py-4 sm:py-5 text-lg sm:text-xl focus:outline-none transition-all font-mono placeholder:text-stone-300 bg-stone-50/50 text-stone-900"
-                    onKeyDown={(e) => e.key === 'Enter' && handleNextStep1()}
+                    onKeyDown={(e) => e.key === 'Enter' && startSession()}
                   />
                 </div>
 
                 <button
-                  onClick={handleNextStep1}
+                  onClick={startSession}
                   className="w-full py-4.5 bg-stone-900 hover:bg-stone-800 text-white rounded-2xl font-extrabold text-base sm:text-lg tracking-wide flex items-center justify-center gap-2 transition-all cursor-pointer button-shadow"
                 >
                   ถัดไป
@@ -164,41 +257,46 @@ export default function App() {
               </p>
 
               <div className="w-full bg-white border-2 border-stone-900 rounded-3xl p-6 sm:p-10 card-shadow flex flex-col gap-8">
-                
+
                 {/* Visual Layout Options */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { id: '4cut', title: '4-Cut Strip', desc: '4 ช่องแนวตั้ง', render: () => (
-                      <div className="w-8 h-18 border-2 border-stone-850 rounded flex flex-col gap-0.5 p-0.5 justify-between bg-white shadow-sm">
-                        <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
-                        <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
-                        <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
-                        <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
-                      </div>
-                    )},
-                    { id: '2x2', title: '2x2 Grid', desc: 'ตาราง 4 ช่อง', render: () => (
-                      <div className="w-14 h-14 border-2 border-stone-850 rounded grid grid-cols-2 gap-0.5 p-0.5 bg-white shadow-sm">
-                        <div className="bg-stone-100 rounded-sm border border-stone-200" />
-                        <div className="bg-stone-100 rounded-sm border border-stone-200" />
-                        <div className="bg-stone-100 rounded-sm border border-stone-200" />
-                        <div className="bg-stone-100 rounded-sm border border-stone-200" />
-                      </div>
-                    )},
-                    { id: 'polaroid', title: 'Polaroid', desc: 'ภาพเดี่ยวขอบหนา', render: () => (
-                      <div className="w-14 h-16 border-2 border-stone-850 rounded flex flex-col gap-0.5 p-0.5 bg-white shadow-sm">
-                        <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
-                        <div className="h-3 w-full bg-stone-50 border-t border-stone-200" />
-                      </div>
-                    )}
+                    {
+                      id: '4cut', title: '4-Cut Strip', desc: '4 ช่องแนวตั้ง', render: () => (
+                        <div className="w-8 h-18 border-2 border-stone-850 rounded flex flex-col gap-0.5 p-0.5 justify-between bg-white shadow-sm">
+                          <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
+                          <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
+                          <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
+                          <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
+                        </div>
+                      )
+                    },
+                    {
+                      id: '2x2', title: '2x2 Grid', desc: 'ตาราง 4 ช่อง', render: () => (
+                        <div className="w-14 h-14 border-2 border-stone-850 rounded grid grid-cols-2 gap-0.5 p-0.5 bg-white shadow-sm">
+                          <div className="bg-stone-100 rounded-sm border border-stone-200" />
+                          <div className="bg-stone-100 rounded-sm border border-stone-200" />
+                          <div className="bg-stone-100 rounded-sm border border-stone-200" />
+                          <div className="bg-stone-100 rounded-sm border border-stone-200" />
+                        </div>
+                      )
+                    },
+                    {
+                      id: 'polaroid', title: 'Polaroid', desc: 'ภาพเดี่ยวขอบหนา', render: () => (
+                        <div className="w-14 h-16 border-2 border-stone-850 rounded flex flex-col gap-0.5 p-0.5 bg-white shadow-sm">
+                          <div className="bg-stone-100 flex-1 rounded-sm border border-stone-200" />
+                          <div className="h-3 w-full bg-stone-50 border-t border-stone-200" />
+                        </div>
+                      )
+                    }
                   ].map((option) => (
                     <button
                       key={option.id}
                       onClick={() => setSelectedLayout(option.id as any)}
-                      className={`p-5 rounded-2xl border-2 flex flex-row sm:flex-col items-center justify-between sm:justify-center gap-4 sm:gap-4 transition-all cursor-pointer ${
-                        selectedLayout === option.id 
-                          ? 'border-stone-950 bg-stone-950 text-white shadow-md' 
-                          : 'border-stone-250 bg-stone-50/50 hover:bg-stone-50 text-stone-600 hover:text-stone-900'
-                      }`}
+                      className={`p-5 rounded-2xl border-2 flex flex-row sm:flex-col items-center justify-between sm:justify-center gap-4 sm:gap-4 transition-all cursor-pointer ${selectedLayout === option.id
+                        ? 'border-stone-950 bg-stone-950 text-white shadow-md'
+                        : 'border-stone-250 bg-stone-50/50 hover:bg-stone-50 text-stone-600 hover:text-stone-900'
+                        }`}
                     >
                       {option.render()}
                       <div className="text-left sm:text-center flex-1 sm:flex-initial">
@@ -247,10 +345,10 @@ export default function App() {
                 กลุ่ม: <span className="font-mono text-stone-950 font-extrabold">{groupName}</span> | โหมด: <span className="font-heading text-stone-950 font-extrabold">{selectedLayout === '4cut' ? '4-Cut Strip' : selectedLayout === '2x2' ? '2x2 Grid' : 'Polaroid'}</span>
               </p>
 
-              {/* Minimal Viewfinder Placeholder */}
+              {/* Viewfinder Placeholder */}
               <div className="w-full bg-white border-2 border-stone-900 rounded-3xl p-5 sm:p-8 card-shadow flex flex-col gap-6">
                 <div className="aspect-video w-full border-2 border-stone-900 rounded-2xl relative overflow-hidden bg-stone-950 flex flex-col justify-between p-4 scanlines">
-                  
+
                   {/* Viewfinder corner lines */}
                   <div className="absolute top-3.5 left-3.5 w-6 h-6 border-t-2 border-l-2 border-white/60" />
                   <div className="absolute top-3.5 right-3.5 w-6 h-6 border-t-2 border-r-2 border-white/60" />
@@ -319,15 +417,15 @@ export default function App() {
 
       {/* Footer copyright */}
       <footer className="w-full text-center py-4 text-xs font-mono text-stone-450 z-10 border-t border-stone-100 max-w-5xl mx-auto">
-        &copy; {new Date().getFullYear()} PHOTOBOOTH CORP. ALL RIGHTS RESERVED.
+        &copy; {new Date().getFullYear()} NARATIP PHOTOBOOTH. ALL RIGHTS RESERVED.
       </footer>
 
-      {/* Slide-over System Diagnostic Panel (fully responsive drawer) */}
+      {/* Slide-over System Diagnostic Panel */}
       <AnimatePresence>
         {showSystemPanel && (
           <>
             {/* Backdrop */}
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.4 }}
               exit={{ opacity: 0 }}
@@ -335,7 +433,7 @@ export default function App() {
               className="absolute inset-0 bg-stone-900/40 z-40 cursor-pointer backdrop-blur-[2px]"
             />
             {/* Drawer */}
-            <motion.div 
+            <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
@@ -348,7 +446,7 @@ export default function App() {
                     <Terminal className="w-5.5 h-5.5" />
                     SYSTEM DIAGNOSTICS
                   </span>
-                  <button 
+                  <button
                     onClick={() => setShowSystemPanel(false)}
                     className="p-1 rounded hover:bg-stone-100 text-stone-500 hover:text-stone-900 transition-all cursor-pointer"
                   >
@@ -365,21 +463,33 @@ export default function App() {
                         {backendStatus === 'online' ? 'ONLINE (DOCKER)' : 'STANDALONE (OFFLINE)'}
                       </span>
                     </div>
-                    {systemInfo && (
-                      <>
-                        <div className="flex justify-between">
-                          <span className="text-stone-450 font-bold">SERVER CPU:</span>
-                          <span className="text-stone-900 font-bold">{systemInfo.stats.cpu}%</span>
+
+                    {/* Only show system statistics if Admin Token is verified */}
+                    {isAdmin ? (
+                      systemInfo ? (
+                        <>
+                          <div className="flex justify-between">
+                            <span className="text-stone-450 font-bold">SERVER CPU:</span>
+                            <span className="text-stone-900 font-bold">{systemInfo.stats?.cpu}%</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-stone-450 font-bold">SERVER RAM:</span>
+                            <span className="text-stone-900 font-bold">{systemInfo.stats?.ram}</span>
+                          </div>
+                          <div className="flex flex-col gap-1 mt-1 pt-3 border-t border-stone-200/50">
+                            <span className="text-stone-450 font-bold text-[10px]">GALLERY DIR:</span>
+                            <span className="text-stone-850 text-[10px] break-all">{systemInfo.galleryPath}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-stone-400 italic text-center py-2">
+                          Loading diagnostics stats...
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-stone-450 font-bold">SERVER RAM:</span>
-                          <span className="text-stone-900 font-bold">{systemInfo.stats.ram}</span>
-                        </div>
-                        <div className="flex flex-col gap-1 mt-1 pt-3 border-t border-stone-200/50">
-                          <span className="text-stone-450 font-bold text-[10px]">GALLERY DIR:</span>
-                          <span className="text-stone-850 text-[10px] break-all">{systemInfo.galleryPath}</span>
-                        </div>
-                      </>
+                      )
+                    ) : (
+                      <div className="text-[11.5px] text-stone-400 italic text-center py-2 border-t border-stone-100">
+                        🔒 Diagnostics metrics are locked for guests. Visit with admin token to unlock.
+                      </div>
                     )}
                   </div>
 

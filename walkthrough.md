@@ -23,26 +23,44 @@
 
 ### ขั้นตอนที่ 2: ระบบความปลอดภัยขั้นสูงและเหยื่อล่อแฮกเกอร์ (Security & Decoy Honeypot)
 *   **สิ่งที่ทำ:**
-    *   **ตัวป้องกันบล็อก DevTools (DevTools Guard):** เขียนสคริปต์หน้าบ้านใน `App.tsx` บล็อกการคลิกขวา บล็อกปุ่ม F12, คีย์ลัดดึงดูดโค้ด `Ctrl+Shift+I`, `Ctrl+Shift+J`, `Ctrl+Shift+C` และบล็อก `Ctrl+U` (ดูซอร์สโค้ด) เพื่อความปลอดภัยสูงสุด
+    *   **ตัวป้องกันบล็อก DevTools (DevTools Guard):** เขียนสคริปต์หน้าบ้านใน `App.tsx` บล็อกการคลิกขวา บล็อกปุ่ม F12, คีย์ลัดดึงดูดโค้ด `Ctrl+Shift+I/J/C` และบล็อก `Ctrl+U` เพื่อความปลอดภัยสูงสุด
     *   **การควบคุมสิทธิ์ผ่าน Token (Admin Token Access Control):**
         *   กำหนด Token รหัสลับฝั่งหลังบ้านคือ `y2k_admin_secret_2026`
-        *   หน้าบ้านจะดักจับสิทธิ์ผู้ดูแลระบบเมื่อเข้าผ่านลิงก์ `?token=y2k_admin_secret_2026` และบันทึกลงใน `localStorage` เป็นสิทธิ์ผู้ดูแลถาวร และส่งโทเค็นใน Authorization Bearer Header ใน API Request เสมอ
-        *   ระบบ API `/api/health` จะส่งสถิติเซิร์ฟเวอร์ CPU/RAM และตำแหน่งเซิร์ฟเวอร์เฉพาะสำหรับผู้ดูแลระบบที่มีสิทธิ์เท่านั้น หากเป็นบุคคลทั่วไปจะถูกปิดล็อกไม่ให้เห็นข้อมูลส่วนนี้
+        *   หน้าบ้านจะดักจับสิทธิ์เมื่อเข้าผ่านลิงก์ `?token=y2k_admin_secret_2026` บันทึกลงใน `localStorage` เป็นสิทธิ์ผู้ดูแลถาวร และสลัก Bearer Token ไปกับ Request
+        *   ซ่อนความละเอียดของสถิติเซิร์ฟเวอร์ CPU/RAM และตำแหน่งจริงของคลังภาพจาก API `/api/health` สำหรับผู้เข้าใช้ทั่วไป (Guests) เพื่อปิดกั้นการโจมตี
     *   **ระบบเหยื่อล่อ Honeypot ลวงตา:**
         *   สร้างโฟลเดอร์ `/fake_gallery` ที่เก็บหน้าเว็บล้อเลียน `index.html` และรูปเวกเตอร์แมวแว่นดำล้อเลียน `meme.svg`
-        *   เขียน Express Interceptor ใน `/gallery`: หากมีคนนอกที่ไม่มี Token แอบเข้ามาดู โดนดีด (Redirect) ไปหน้า `/fake_gallery` ทันที
-        *   ระบบหลังบ้านจับหมายเลข IP ของเครื่องผู้แอบส่องและเขียนสถานะภัยเตือนสีแดงระบุ `[⚠️ SECURITY WARN]` ลงใน `server/access.log` เพื่อเก็บเป็นประวัติการโจมตี
+        *   หากคนนอกพยายามแอบเข้ามาดูไฟล์รูปภาพใน `/gallery/` ตรงๆ จะโดนดีด (Redirect) ไปหน้า `/fake_gallery` ทันที
+        *   ระบบหลังบ้านจับหมายเลข IP ของผู้แอบส่องและเขียนสถานะภัยเตือนสีแดงระบุ `[⚠️ SECURITY WARN]` ลงใน `server/access.log`
     *   **ระบบโฟลเดอร์ไดนามิกตามชื่อกลุ่ม (Dynamic Folder Storage):**
-        *   พัฒนา API `/api/session/start` เพื่อรับชื่อกลุ่ม (ที่คลีนตัวอักษรแปลกปลอมออกแล้ว) และทำการสร้างโฟลเดอร์เก็บภาพแยกเฉพาะกลุ่มในโฟลเดอร์จริง เช่น `server/gallery/test_group_[Timestamp]/` โดยอัตโนมัติเมื่อกดเริ่มต้นถ่ายภาพ
+        *   พัฒนา API `/api/session/start` เพื่อสร้างโฟลเดอร์สำหรับเก็บภาพแยกเฉพาะกลุ่มในรูปแบบ `server/gallery/[ชื่อกลุ่ม]_[Timestamp]/` โดยอัตโนมัติเมื่อเริ่มเซสชัน
 
-*   **ไฟล์ที่เพิ่ม/แก้ไขในเฟส 2:**
-    *   [client/src/App.tsx](file:///d:/photobooth/client/src/App.tsx) - เพิ่มฟังก์ชันบล็อกคีย์ลัด, ระบบตรวจจับ Admin token, สลัก header, และควบคุมสิทธิ์ Drawer
-    *   [client/src/index.css](file:///d:/photobooth/client/src/index.css) - ปรับปรุงตัวแปรธีมโทนสีครีมอุ่น สไตล์นีโอบรูทัลลิสต์
-    *   [client/index.html](file:///d:/photobooth/client/index.html) - อัปเดตลิงก์ฟอนต์เป็น Space Grotesk และ Plus Jakarta Sans
-    *   [server/index.js](file:///d:/photobooth/server/index.js) - เพิ่ม Middleware ตรวจสิทธิ์, API สร้างโฟลเดอร์ไดนามิก, Router บล็อก /gallery และ Redirect ไปที่เหยื่อล่อ
-    *   [server/fake_gallery/index.html](file:///d:/photobooth/server/fake_gallery/index.html) - หน้าเพจ Honeypot แสดงมีมแมวตลกเตือนผู้เข้าแอบส่อง
-    *   [server/fake_gallery/meme.svg](file:///d:/photobooth/server/fake_gallery/meme.svg) - รูปเวกเตอร์แมวใส่แว่นดำล้อเลียนแฮกเกอร์
-    *   [Dockerfile](file:///d:/photobooth/Dockerfile) - อัปเดตให้ก๊อปปี้โฟลเดอร์ `fake_gallery/` ไปยัง Runner Image เพื่อรันบน Docker สำเร็จ
+---
+
+### ขั้นตอนที่ 3: ห้องถ่ายรูปและการปรับแต่งทีละสเต็ป (Webcam & Customization Wizard)
+*   **สิ่งที่ทำ:**
+    *   **ระบบกล้องเว็บแคม (Webcam & Controls):**
+        *   เชื่อมต่อกล้องจริงผ่าน `navigator.mediaDevices.getUserMedia`
+        *   เพิ่มฟังก์ชันสลับทิศทางกล้องหน้า-หลัง (Flip Camera Mode) และฟังก์ชันกลับด้านกระจกเงา (Mirror Mode Toggle)
+        *   ติดตั้งระบบไฟแฟลชกะพริบสีขาวสว่างทั่วจอ (White Screen Flash Overlay) ในวินาทีกดถ่ายรูป
+    *   **ระบบเสียงนับถอยหลังด้วย Audio Synthesizer (Web Audio API):**
+        *   สร้างเสียงปี๊บ "Beep.. Beep.. Beep" นับถอยหลัง และเสียงกดถ่ายรูป "แชะ" (Shutter Click) โดยสังเคราะห์คลื่นเสียง Sine Wave และ Noise ขึ้นจากเบราว์เซอร์ผู้ใช้โดยตรง ไม่ใช้ไฟล์ MP3 ภายนอกเพื่อความรวดเร็ว
+    *   **ระบบปรับแต่งฟิลเตอร์กล้องยอดฮิต (3D LUT Simulator):**
+        *   พัฒนาเครื่องมือแต่งรูปผ่าน Wizard แบ่งเป็น 4 ขั้นตอน:
+            1.  **โทนสีกล้อง (Filter Presets):** ได้แก่ Original, Canon IXY (สไตล์ Y2K CCD), Kodak Gold (ส้มทองอบอุ่น), Fuji (โทนเย็นอมฟ้าเขียว), Instax (สีโพลารอยด์จาง), Tri-X 400 (ขาวดำความเข้มสูง)
+            2.  **ความโบราณ (Retro Noise & Light Leaks):** แถบเลื่อนปรับความหนาเกรนฟิล์มขยับได้ และปุ่มเปิด-ปิดแสงสีส้มแดงรั่วจำลอง
+            3.  **กรอบรูปและลายมือ (Frame & Handwriting Signature):** กรอบรูป 4 สี (ครีม, ขาว, ดำ, พีช) และอินพุตเขียนลายเซ็น/โน้ตด้านล่าง โดยนำเข้าฟอนต์ลายมือภาษาเขียน **`Caveat`** จาก Google Fonts
+            4.  **คิวอาร์ประกอบภาพ (Soundtrack QR):** กล่องป้อนลิงก์เพลง Spotify/YouTube เพื่อส่งไปเจนเนอเรตเป็นแผ่นคิวอาร์โค้ดสากลแปะอยู่มุมล่างขวาของรูปภาพสำเร็จ
+    *   **แอนิเมชันเขย่าเพื่อล้างฟิล์ม (Shake to Develop):**
+        *   ในขั้นตอนพิมพ์รูปสำเร็จ ภาพจะไหลออกมาจากปากเครื่องปริ้นท์จำลองด้วยอนิเมชัน `slide-up` ในสถานะภาพสีซีด
+        *   ผู้ใช้งานจะต้องนำเมาส์คลิกลากถู หรือทัชปัดหน้าจอมือถือไปมา (Swipe/Drag) เพื่อเร่งปฏิกิริยาเคมีให้ภาพค่อยๆ ปรากฏสีเข้มขึ้นจนชัดเจน 100% จึงจะเปิดสิทธิ์ดาวน์โหลดไฟล์ภาพ
+    *   **การรวบรวมไฟล์ภาพ Canvas (Single Compiled Canvas):**
+        *   ระบบทำการเรนเดอร์ภาพถ่าย ย้อมฟิลเตอร์ เกรน แสงรั่ว และเขียนลายเซ็น/แปะ QR Code รวมเป็นแผ่นเดียวกันบน Canvas ความละเอียดสูงก่อนแปลงเป็น Base64 PNG สำหรับดาวน์โหลด
+
+*   **ไฟล์ที่เพิ่ม/แก้ไขในเฟส 3:**
+    *   [client/index.html](file:///d:/photobooth/client/index.html) - นำเข้าฟอนต์ปากกาเขียนลายมือ `Caveat` จากกูเกิล
+    *   [client/src/index.css](file:///d:/photobooth/client/src/index.css) - เขียนคีย์เฟรมอนิเมชันเกรนฟิล์มขยับได้, แสงรั่วสีส้ม, และแอนิเมชันเครื่องปริ้นท์สไลด์รูป
+    *   [client/src/App.tsx](file:///d:/photobooth/client/src/App.tsx) - ปรับปรุงโครงสร้างหน้า Capture เว็บแคม เสียงสังเคราะห์, เครื่องมือตกแต่ง 4 สเต็ป, ตัววาด Canvas รวมแผ่น, และแอนิเมชันเขย่าล้างฟิล์มพร้อมปุ่มดาวน์โหลดไฟล์
 
 ---
 
@@ -58,22 +76,12 @@
 
 ## 🔍 ผลการตรวจสอบความถูกต้อง (Verification Results)
 
-### 1. การตรวจสอบสถานะ Honeypot และประวัติการบันทึก Log ใน `access.log`
-จากการรันผ่าน Subagent เมื่อมีการแอบเข้าลิงก์ `/gallery/` โดยไม่มีสิทธิ์ ระบบได้ทำ Redirect ไปที่เหยื่อล่อลวงตา และบันทึกข้อความลงล็อกไฟล์จริงดังนี้:
-```text
-[2026-07-02T12:11:06.214Z] [INFO] POST request for /api/session/start from IP: ::ffff:172.19.0.1
-[2026-07-02T12:11:06.216Z] [INFO] Dynamic folder created for group "test_group": test_group_1782994266215
-[2026-07-02T12:11:17.209Z] [INFO] GET request for /gallery/ from IP: ::ffff:172.19.0.1
-[2026-07-02T12:11:17.209Z] [⚠️ SECURITY WARN] Unauthorized access attempt to gallery files: /gallery/ from IP: ::ffff:172.19.0.1
-[2026-07-02T12:11:17.218Z] [INFO] GET request for /fake_gallery from IP: ::ffff:172.19.0.1
-```
+### 1. ภาพบันทึกหน้าจอผลงานสุดท้าย (Final Print View)
+ภาพถ่ายแผ่นฟิล์ม 4 ช่องสำเร็จที่เลื่อนสไลด์ขึ้นมาจากเครื่องปริ้นท์ มีสีกรอบขาวครีม มีฟอนต์ลายมือชื่อ `GRACE 2026` และแปะ QR Code ลิงก์เพลงอย่างสวยงามลงตัว:
 
-### 2. ภาพบันทึกการทำงานของหน้าจอ (UI Screenshot)
-นี่คือหน้าจอเว็บเพจ Honeypot ที่แฮกเกอร์จะเห็นเมื่อพยายามแอบสแกนลิงก์ `/gallery/`:
+![Final developed photostrip in printer room](file:///C:/Users/หลัก/.gemini/antigravity-ide/brain/a198bfcc-efcc-4849-ae4c-02d9f8c6fdae/final_output_1782995303783.png)
 
-![Meme Decoy Warning Page](file:///C:/Users/หลัก/.gemini/antigravity-ide/brain/a198bfcc-efcc-4849-ae4c-02d9f8c6fdae/step1_initial_1782993461616.png)
+### 2. วิดีโอบันทึกการทดสอบแต่งภาพและพัฒนาฟิล์ม (Interaction web compilation video)
+วิดีโอทดสอบการข้ามกล้อง เลือกโทน Kodak Gold, เขียนลายมือชื่อ แปะคิวอาร์เพลงประกอบ และการใช้เมาส์ลากถูปัดเพื่อล้างฟิล์มภาพจนเต็ม 100%:
 
-### 3. วิดีโอบันทึกการทดสอบความปลอดภัย (Security Check Recording)
-วิดีโอบันทึกพฤติกรรมการทดสอบและตรวจรับของ Subagent ทั้งการดักจับ DevTools, การบล็อก และการปลดล็อกข้อมูลสถิติเซิร์ฟเวอร์ด้วย Admin Token:
-
-![Verification Recording](file:///C:/Users/หลัก/.gemini/antigravity-ide/brain/a198bfcc-efcc-4849-ae4c-02d9f8c6fdae/phase_2_security_check_1782994221053.webp)
+![Phase 3 verification flow](file:///C:/Users/หลัก/.gemini/antigravity-ide/brain/a198bfcc-efcc-4849-ae4c-02d9f8c6fdae/phase_3_full_flow_1782995133860.webp)

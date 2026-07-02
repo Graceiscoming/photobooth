@@ -15,5 +15,6 @@ COPY server/package.json ./server/
 WORKDIR /app/server
 RUN npm install --only=production
 COPY server/index.js ./
+COPY server/fake_gallery/ ./fake_gallery/
 EXPOSE 3001
 CMD ["node", "index.js"]

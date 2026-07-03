@@ -1,0 +1,12 @@
+<svg width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fujiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F2F4F4" />   <!-- Soft Clean Highlight -->
+      <stop offset="35%" stop-color="#A9DFBF" />  <!-- Soft Fuji Mint Green -->
+      <stop offset="70%" stop-color="#2E86C1" />  <!-- Cool Fuji Blue -->
+      <stop offset="90%" stop-color="#1F4E5B" />  <!-- Deep Green-Blue Midtone -->
+      <stop offset="100%" stop-color="#1B2631" /> <!-- Cold Teal Shadow -->
+    </linearGradient>
+  </defs>
+  <rect width="150" height="150" fill="url(#fujiGrad)" />
+</svg>

@@ -1,0 +1,12 @@
+<svg width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="kodakGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FEF9E7" />   <!-- Golden Warm Highlight -->
+      <stop offset="25%" stop-color="#F4D03F" />  <!-- Bright Gold -->
+      <stop offset="55%" stop-color="#DC7633" />  <!-- Orange/Brown Midtone -->
+      <stop offset="85%" stop-color="#A04000" />  <!-- Warm Terracotta -->
+      <stop offset="100%" stop-color="#3E2723" /> <!-- Dark Chocolate Shadow -->
+    </linearGradient>
+  </defs>
+  <rect width="150" height="150" fill="url(#kodakGrad)" />
+</svg>

@@ -1,0 +1,20 @@
+<svg width="1200" height="1420" viewBox="0 0 1200 1420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Frame Background Mockup (Cream) -->
+  <rect width="1200" height="1420" fill="#FEFCF8"/>
+  <rect x="2" y="2" width="1196" height="1416" rx="8" stroke="#E8E4D5" stroke-width="4"/>
+
+  <!-- Guide Text & Title -->
+  <text x="600" y="1250" font-family="sans-serif" font-size="28" font-weight="bold" fill="#706A60" text-anchor="middle">SIGNATURE / LOGO AREA (Y: 1140 - 1420)</text>
+  <text x="600" y="1290" font-family="sans-serif" font-size="20" fill="#A09C90" text-anchor="middle">Recommended QR Code on Bottom-Right (165 x 165 px)</text>
+
+  <!-- Photo Hole (Single Square) -->
+  <g id="photo-hole-polaroid">
+    <rect x="60" y="60" width="1080" height="1080" rx="4" fill="#EF4444" fill-opacity="0.15" stroke="#EF4444" stroke-width="4" stroke-dasharray="8 8"/>
+    <text x="600" y="580" font-family="sans-serif" font-size="38" font-weight="bold" fill="#EF4444" text-anchor="middle">POLAROID PHOTO HOLE</text>
+    <text x="600" y="630" font-family="sans-serif" font-size="24" fill="#7F1D1D" text-anchor="middle">Size: 1080 x 1080 px (1:1) | Pos: X=60, Y=60</text>
+  </g>
+
+  <!-- QR Code Placement Guide Grid -->
+  <rect x="975" y="1197" width="165" height="165" fill="#3B82F6" fill-opacity="0.1" stroke="#3B82F6" stroke-width="2" stroke-dasharray="4 4"/>
+  <text x="1057" y="1285" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1D4ED8" text-anchor="middle">QR CODE AREA</text>
+</svg>

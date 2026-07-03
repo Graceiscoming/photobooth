@@ -1,0 +1,2 @@
+# Place 10-20 sample JPEG/PNG photos of Instax Polaroid photos in this directory.
+# Then run the precompute command in your terminal.

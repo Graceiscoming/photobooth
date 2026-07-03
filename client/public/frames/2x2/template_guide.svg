@@ -1,0 +1,41 @@
+<svg width="1965" height="1695" viewBox="0 0 1965 1695" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Frame Background Mockup (Cream) -->
+  <rect width="1965" height="1695" fill="#FEFCF8"/>
+  <rect x="2" y="2" width="1961" height="1691" rx="8" stroke="#E8E4D5" stroke-width="4"/>
+
+  <!-- Guide Text & Title -->
+  <text x="982" y="1560" font-family="sans-serif" font-size="28" font-weight="bold" fill="#706A60" text-anchor="middle">SIGNATURE / LOGO AREA (Y: 1455 - 1695)</text>
+  <text x="982" y="1600" font-family="sans-serif" font-size="20" fill="#A09C90" text-anchor="middle">Recommended QR Code on Bottom-Right (165 x 165 px)</text>
+
+  <!-- Photo Hole Row 1 - Left -->
+  <g id="photo-hole-1-1">
+    <rect x="60" y="60" width="900" height="675" rx="4" fill="#EF4444" fill-opacity="0.15" stroke="#EF4444" stroke-width="4" stroke-dasharray="8 8"/>
+    <text x="510" y="380" font-family="sans-serif" font-size="32" font-weight="bold" fill="#EF4444" text-anchor="middle">PHOTO HOLE 1 (TOP-LEFT)</text>
+    <text x="510" y="425" font-family="sans-serif" font-size="20" fill="#7F1D1D" text-anchor="middle">Size: 900 x 675 px (4:3) | Pos: X=60, Y=60</text>
+  </g>
+
+  <!-- Photo Hole Row 1 - Right -->
+  <g id="photo-hole-1-2">
+    <rect x="1005" y="60" width="900" height="675" rx="4" fill="#EF4444" fill-opacity="0.15" stroke="#EF4444" stroke-width="4" stroke-dasharray="8 8"/>
+    <text x="1455" y="380" font-family="sans-serif" font-size="32" font-weight="bold" fill="#EF4444" text-anchor="middle">PHOTO HOLE 2 (TOP-RIGHT)</text>
+    <text x="1455" y="425" font-family="sans-serif" font-size="20" fill="#7F1D1D" text-anchor="middle">Size: 900 x 675 px (4:3) | Pos: X=1005, Y=60</text>
+  </g>
+
+  <!-- Photo Hole Row 2 - Left -->
+  <g id="photo-hole-2-1">
+    <rect x="60" y="780" width="900" height="675" rx="4" fill="#EF4444" fill-opacity="0.15" stroke="#EF4444" stroke-width="4" stroke-dasharray="8 8"/>
+    <text x="510" y="1100" font-family="sans-serif" font-size="32" font-weight="bold" fill="#EF4444" text-anchor="middle">PHOTO HOLE 3 (BOTTOM-LEFT)</text>
+    <text x="510" y="1145" font-family="sans-serif" font-size="20" fill="#7F1D1D" text-anchor="middle">Size: 900 x 675 px (4:3) | Pos: X=60, Y=780</text>
+  </g>
+
+  <!-- Photo Hole Row 2 - Right -->
+  <g id="photo-hole-2-2">
+    <rect x="1005" y="780" width="900" height="675" rx="4" fill="#EF4444" fill-opacity="0.15" stroke="#EF4444" stroke-width="4" stroke-dasharray="8 8"/>
+    <text x="1455" y="1100" font-family="sans-serif" font-size="32" font-weight="bold" fill="#EF4444" text-anchor="middle">PHOTO HOLE 4 (BOTTOM-RIGHT)</text>
+    <text x="1455" y="1145" font-family="sans-serif" font-size="20" fill="#7F1D1D" text-anchor="middle">Size: 900 x 675 px (4:3) | Pos: X=1005, Y=780</text>
+  </g>
+
+  <!-- QR Code Placement Guide Grid -->
+  <rect x="1740" y="1492" width="165" height="165" fill="#3B82F6" fill-opacity="0.1" stroke="#3B82F6" stroke-width="2" stroke-dasharray="4 4"/>
+  <text x="1822" y="1580" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1D4ED8" text-anchor="middle">QR CODE AREA</text>
+</svg>

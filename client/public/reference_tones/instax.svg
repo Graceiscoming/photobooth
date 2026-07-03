@@ -1,0 +1,12 @@
+<svg width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="instaxGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBEEE6" />   <!-- Soft Warm Cream Highlight -->
+      <stop offset="30%" stop-color="#EDBB99" />  <!-- Pastel Orange-Pink -->
+      <stop offset="65%" stop-color="#AEB6BF" />  <!-- Faded Desaturated Gray -->
+      <stop offset="85%" stop-color="#85929E" />  <!-- Cool Muted Slate -->
+      <stop offset="100%" stop-color="#2C3E50" /> <!-- Faded Muted Navy Shadow -->
+    </linearGradient>
+  </defs>
+  <rect width="150" height="150" fill="url(#instaxGrad)" />
+</svg>

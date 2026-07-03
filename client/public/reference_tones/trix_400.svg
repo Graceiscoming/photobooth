@@ -1,0 +1,12 @@
+<svg width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="trixGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />   <!-- Pure White Highlight -->
+      <stop offset="25%" stop-color="#D5D8DC" />  <!-- Light Gray -->
+      <stop offset="50%" stop-color="#7B7D7D" />  <!-- Medium Gray -->
+      <stop offset="80%" stop-color="#2C3E50" />  <!-- Dark Slate Gray -->
+      <stop offset="100%" stop-color="#000000" /> <!-- Pure Black Shadow -->
+    </linearGradient>
+  </defs>
+  <rect width="150" height="150" fill="url(#trixGrad)" />
+</svg>

@@ -1,0 +1,2 @@
+# Place 10-20 sample JPEG/PNG photos taken with a Kodak Gold film/preset in this directory.
+# Then run the precompute command in your terminal.

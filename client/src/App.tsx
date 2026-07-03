@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 // @ts-ignore
 import gifshot from 'gifshot';
+import { applyColorTransfer, calculateStats, ImageStats } from './utils/colorTransfer';
 import { 
   Camera, 
   Wifi, 
@@ -18,11 +19,14 @@ import {
   Music,
   Sliders,
   Sparkles,
-  Layers
+  Layers,
+  Images,
+  CloudUpload,
+  ZoomIn
 } from 'lucide-react';
 
 export default function App() {
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [groupName, setGroupName] = useState('');
   const [selectedLayout, setSelectedLayout] = useState<'4cut' | '2x2' | 'polaroid'>('4cut');
   
@@ -31,6 +35,9 @@ export default function App() {
   const [systemInfo, setSystemInfo] = useState<any>(null);
   const [showSystemPanel, setShowSystemPanel] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAiConnected, setIsAiConnected] = useState(false);
+  const [isProcessingFilters, setIsProcessingFilters] = useState(false);
+  const [filterProgress, setFilterProgress] = useState(0);
   const [logs, setLogs] = useState<string[]>([
     'System initialized in Minimal Warm mode.',
     'Docker connection ready.'
@@ -78,7 +85,8 @@ export default function App() {
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedFilter, setSelectedFilter] = useState<'original' | 'ixy' | 'gold' | 'fuji' | 'instax' | 'trix'>('original');
   const [grainDensity, setGrainDensity] = useState(25);
-  const [lightLeakActive, setLightLeakActive] = useState(false);
+  const [lightLeakIntensity, setLightLeakIntensity] = useState(0);
+  const [lightLeakStyle, setLightLeakStyle] = useState<'warm' | 'magenta' | 'prism'>('warm');
   const [frameColor, setFrameColor] = useState('#fefcf8'); // Cream
   const [signatureText, setSignatureText] = useState('');
   const [showSignature, setShowSignature] = useState(true);
@@ -90,6 +98,78 @@ export default function App() {
   const [isDeveloping, setIsDeveloping] = useState(true);
   const isDraggingRef = useRef(false);
   const lastDragPosRef = useRef({ x: 0, y: 0 });
+
+  // Custom frame overlay (persisted in localStorage)
+  const [customFrameDataUrl, setCustomFrameDataUrl] = useState<string>(() => {
+    return localStorage.getItem('customFramePNG') || '';
+  });
+
+  const saveCustomFrame = (dataUrl: string) => {
+    setCustomFrameDataUrl(dataUrl);
+    localStorage.setItem('customFramePNG', dataUrl);
+  };
+
+  const clearCustomFrame = () => {
+    setCustomFrameDataUrl('');
+    localStorage.removeItem('customFramePNG');
+  };
+
+  // Phase 4: Server upload & gallery states
+  const [serverFolderName, setServerFolderName] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadDone, setUploadDone] = useState(false);
+  const [galleryFiles, setGalleryFiles] = useState<Array<{ fileName: string; url: string; type: string; createdAt: string }>>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState('');
+
+  // Cache for target filter statistics (Reinhard Color DNA)
+  const filterStatsRef = useRef<{ [key: string]: ImageStats }>({});
+
+  const getTargetStats = async (filterName: string): Promise<ImageStats | null> => {
+    if (filterName === 'original') return null;
+    if (filterStatsRef.current[filterName]) {
+      return filterStatsRef.current[filterName];
+    }
+
+    try {
+      const img = new Image();
+      let path = '';
+      if (filterName === 'ixy') path = '/reference_tones/canon_ixy.svg';
+      else if (filterName === 'gold') path = '/reference_tones/kodak_gold.svg';
+      else if (filterName === 'fuji') path = '/reference_tones/fuji_superia.svg';
+      else if (filterName === 'instax') path = '/reference_tones/instax.svg';
+      else if (filterName === 'trix') path = '/reference_tones/trix_400.svg';
+      else return null;
+
+      img.src = path;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = img.width || 150;
+      tempCanvas.height = img.height || 150;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (tempCtx) {
+        tempCtx.drawImage(img, 0, 0);
+        const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const stats = calculateStats(imgData.data, 4); // Stride 4 for 150x150 is very fast
+        filterStatsRef.current[filterName] = stats;
+        return stats;
+      }
+    } catch (e) {
+      console.error(`Failed to load target stats for filter ${filterName}:`, e);
+    }
+    return null;
+  };
+
+  // Pre-load target stats for Reinhard color transfer when user switches filters in the wizard
+  useEffect(() => {
+    if (selectedFilter !== 'original') {
+      getTargetStats(selectedFilter);
+    }
+  }, [selectedFilter]);
 
   // Web Audio API Synthesizer
   const playBeep = (freq = 800, duration = 0.15) => {
@@ -213,6 +293,19 @@ export default function App() {
       setBackendStatus('offline');
       setSystemInfo(null);
     }
+
+    // Check AI server-side status
+    try {
+      const aiResp = await fetch('/api/ai/status');
+      if (aiResp.ok) {
+        const aiData = await aiResp.json();
+        setIsAiConnected(aiData.available);
+      } else {
+        setIsAiConnected(false);
+      }
+    } catch {
+      setIsAiConnected(false);
+    }
   };
 
   useEffect(() => {
@@ -234,6 +327,8 @@ export default function App() {
     }
 
     const cleanGroupName = groupName.trim().replace(/[^a-zA-Z0-9_]/g, '_');
+    // Always create a client-side folder name as fallback for upload
+    const clientFolderName = `${cleanGroupName}_${Date.now()}`;
     addLog(`Requesting server directory creation for "${cleanGroupName}"...`);
 
     try {
@@ -249,15 +344,80 @@ export default function App() {
 
       if (response.ok) {
         const data = await response.json();
+        setServerFolderName(data.folderName); // Use server-created folder name
         addLog(`Session directory created: ${data.folderName}`);
         setStep(2);
       } else {
         throw new Error();
       }
     } catch (error: any) {
-      addLog(`Fallback: Using Standalone mode. (Server Offline)`);
+      // Even offline — set a client-side folder name so upload can attempt later
+      setServerFolderName(clientFolderName);
+      addLog(`Fallback: Using Standalone mode. Folder: ${clientFolderName}`);
       setStep(2);
     }
+  };
+
+  // Phase 4: Upload PNG strip + GIFs to server after developing is complete
+  const uploadToServer = async (folder: string) => {
+    if (!folder) return; // Always attempt upload if we have a folder name
+    setIsUploading(true);
+    addLog('Uploading session files to server gallery...');
+    const ts = Date.now();
+    const uploads: Array<{ name: string; data: string }> = [];
+
+    if (finalPhotoDataUrl) {
+      uploads.push({ name: `strip_${ts}.png`, data: finalPhotoDataUrl });
+    }
+    if (gifDataUrl) {
+      uploads.push({ name: `strip_loop_${ts}.gif`, data: gifDataUrl });
+    }
+    if (momentGifUrl) {
+      uploads.push({ name: `moment_${ts}.gif`, data: momentGifUrl });
+    }
+    // Also upload the original individual captured photos so the user gets all raw portraits saved!
+    capturedPhotos.forEach((photo, idx) => {
+      uploads.push({ name: `photo_${idx + 1}.jpg`, data: photo });
+    });
+
+    let allOk = true;
+    for (const file of uploads) {
+      try {
+        const resp = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderName: folder, fileName: file.name, fileData: file.data })
+        });
+        if (!resp.ok) allOk = false;
+      } catch {
+        allOk = false;
+      }
+    }
+
+    setIsUploading(false);
+    if (allOk) {
+      setUploadDone(true);
+      addLog(`Upload complete: ${uploads.length} file(s) saved to gallery/${folder}`);
+    } else {
+      addLog('Warning: Some files failed to upload.');
+    }
+  };
+
+  // Phase 4: Fetch gallery files for current session
+  const fetchGallery = async (folder: string) => {
+    if (!folder) return;
+    setGalleryLoading(true);
+    try {
+      const resp = await fetch(`/api/gallery/${folder}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setGalleryFiles(data.files || []);
+        addLog(`Gallery loaded: ${data.files?.length || 0} file(s) found.`);
+      }
+    } catch {
+      addLog('Error: Could not load gallery.');
+    }
+    setGalleryLoading(false);
   };
 
   const handleNextStep2 = () => {
@@ -305,9 +465,19 @@ export default function App() {
       if (!videoEl || videoEl.paused || videoEl.ended) return;
 
       const canvas = document.createElement('canvas');
-      // Compact size for quick stop-motion GIF generation
-      const targetW = 400;
-      const targetH = 300;
+      // Capture at a high-res but safe width/height to prevent out-of-memory browser crashes
+      const maxDim = 800;
+      let targetW = videoEl.videoWidth || 640;
+      let targetH = videoEl.videoHeight || 480;
+      if (targetW > maxDim || targetH > maxDim) {
+        if (targetW > targetH) {
+          targetH = Math.round((targetH * maxDim) / targetW);
+          targetW = maxDim;
+        } else {
+          targetW = Math.round((targetW * maxDim) / targetH);
+          targetH = maxDim;
+        }
+      }
       canvas.width = targetW;
       canvas.height = targetH;
       const ctx = canvas.getContext('2d');
@@ -333,7 +503,7 @@ export default function App() {
         // Push frame to the current active shot index array
         const currentIdx = activeShotIndexRef.current;
         if (currentIdx >= 0 && currentIdx < 4) {
-          shotFramesRef.current[currentIdx].push(canvas.toDataURL('image/jpeg', 0.6));
+          shotFramesRef.current[currentIdx].push(canvas.toDataURL('image/jpeg', 0.92));
         }
       }
     }, intervalTime);
@@ -352,236 +522,57 @@ export default function App() {
 
   const generateMomentGif = async () => {
     setIsGeneratingMomentGif(true);
-    addLog('Generating animated 4-cut Moment GIF...');
+    addLog('Generating animated Moment timelapse GIF...');
 
     const total = selectedLayout === 'polaroid' ? 1 : 4;
-    const maxFrames = 10; // Number of loops in stop-motion animation
+    
+    // Sub-sample frames from each shot to create a smooth but lightweight high-res loop
+    // Aim for 6 frames per shot (total 24 frames for 4-cut/2x2, or 24 frames for polaroid)
+    const framesPerShot = selectedLayout === 'polaroid' ? 24 : 6;
+    const allFrames: string[] = [];
 
-    // Normalize each shot's frame list to exactly maxFrames (10)
-    const normalizedShots: string[][] = [];
     for (let s = 0; s < total; s++) {
       const frames = shotFramesRef.current[s] || [];
-      if (frames.length === 0) {
-        // Fallback if no frames were recorded
-        const fallback = capturedPhotos[s] || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="%23444"/></svg>';
-        normalizedShots.push(Array(maxFrames).fill(fallback));
-      } else {
-        const list: string[] = [];
-        for (let f = 0; f < maxFrames; f++) {
-          const rawIdx = Math.floor((f / maxFrames) * frames.length);
-          list.push(frames[rawIdx]);
+      if (frames.length > 0) {
+        for (let f = 0; f < framesPerShot; f++) {
+          const rawIdx = Math.floor((f / framesPerShot) * frames.length);
+          allFrames.push(frames[rawIdx]);
         }
-        normalizedShots.push(list);
       }
     }
 
-    // Canvas rendering configurations for the GIF compilation (2x scale is sharp and fast)
-    const scale = 2; 
-    let width = 0;
-    let height = 0;
-    let photoWidth = 0;
-    let photoHeight = 0;
-    const margin = 20 * scale;
-    const spacing = 15 * scale;
-    const bottomSpace = 80 * scale;
-
-    if (selectedLayout === '4cut') {
-      photoWidth = 360 * scale;
-      photoHeight = 270 * scale;
-      width = photoWidth + (margin * 2);
-      height = (photoHeight * 4) + (spacing * 3) + margin + bottomSpace;
-    } else if (selectedLayout === '2x2') {
-      photoWidth = 300 * scale;
-      photoHeight = 225 * scale;
-      width = (photoWidth * 2) + (margin * 2) + spacing;
-      height = (photoHeight * 2) + margin + spacing + bottomSpace;
-    } else { // polaroid
-      photoWidth = 360 * scale;
-      photoHeight = 360 * scale;
-      width = photoWidth + (margin * 2);
-      height = photoHeight + margin + bottomSpace + (20 * scale);
+    // Fallback if no frames were captured
+    if (allFrames.length === 0) {
+      allFrames.push(...capturedPhotos);
     }
 
-    // Apply color filters (enhanced for retro CCD & Film vibes)
-    let filterString = 'none';
-    if (selectedFilter === 'ixy') {
-      filterString = 'contrast(1.15) brightness(1.08) saturate(1.22) sepia(0.08) hue-rotate(-6deg)';
-    } else if (selectedFilter === 'gold') {
-      filterString = 'contrast(0.98) brightness(1.04) saturate(1.38) sepia(0.3) hue-rotate(2deg)';
-    } else if (selectedFilter === 'fuji') {
-      filterString = 'contrast(1.02) brightness(1.02) saturate(0.95) sepia(0.08) hue-rotate(18deg)';
-    } else if (selectedFilter === 'instax') {
-      filterString = 'contrast(0.85) brightness(1.08) saturate(0.88) sepia(0.18)';
-    } else if (selectedFilter === 'trix') {
-      filterString = 'grayscale(1) contrast(1.4) brightness(0.92)';
-    }
+    const firstImg = new Image();
+    firstImg.src = allFrames[0];
+    firstImg.onload = () => {
+      // Keep original camera stream resolution for maximum sharpness!
+      const w = firstImg.width || 640;
+      const h = firstImg.height || 480;
 
-    // Generate Soundtrack QR Image once if needed
-    let qrImg: HTMLImageElement | null = null;
-    if (soundtrackUrl.trim()) {
-      qrImg = new Image();
-      qrImg.crossOrigin = 'anonymous';
-      qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(soundtrackUrl)}`;
-      await new Promise((resolve) => {
-        if (qrImg) {
-          qrImg.onload = resolve;
-          qrImg.onerror = resolve;
-        } else resolve(null);
-      });
-    }
-
-    // Compile maxFrames (10) full strip images sequentially
-    const compiledStrips: string[] = [];
-
-    for (let f = 0; f < maxFrames; f++) {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = width;
-      tempCanvas.height = height;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) continue;
-
-      // Fill background frame color
-      tempCtx.fillStyle = frameColor;
-      tempCtx.fillRect(0, 0, width, height);
-
-      // Draw signature text
-      if (showSignature) {
-        const displaySig = signatureText.trim();
-        if (displaySig) {
-          tempCtx.filter = 'none';
-          tempCtx.fillStyle = selectedFrameIsDark() ? '#ffffff' : '#1c1917';
-          tempCtx.font = `bold ${30 * scale}px 'Caveat', cursive`;
-          tempCtx.textAlign = 'center';
-          const sigY = height - (38 * scale);
-          tempCtx.fillText(displaySig, width / 2, sigY);
-        }
-      }
-
-      // Draw QR Code
-      if (qrImg) {
-        const qrSize = 55 * scale;
-        const qrX = width - qrSize - (16 * scale);
-        const qrY = height - qrSize - (16 * scale);
-        tempCtx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-      }
-
-      // Load frames of all shots for frame index 'f'
-      const loadedImages: HTMLImageElement[] = [];
-      for (let s = 0; s < total; s++) {
-        const img = new Image();
-        img.src = normalizedShots[s][f];
-        loadedImages.push(img);
-        await new Promise((resolve) => {
-          img.onload = resolve;
-          img.onerror = resolve;
-        });
-      }
-
-      // Draw each photo frame onto the canvas
-      loadedImages.forEach((img, idx) => {
-        tempCtx.filter = filterString;
-        
-        let dx = 0, dy = 0;
-        if (selectedLayout === '4cut') {
-          dx = margin;
-          dy = margin + (idx * (photoHeight + spacing));
-        } else if (selectedLayout === '2x2') {
-          const col = idx % 2;
-          const row = Math.floor(idx / 2);
-          dx = margin + (col * (photoWidth + spacing));
-          dy = margin + (row * (photoHeight + spacing));
-        } else { // polaroid
-          dx = margin;
-          dy = margin;
-        }
-
-        // Draw cropped stop-motion frame
-        drawImageCover(tempCtx, img, dx, dy, photoWidth, photoHeight);
-
-        // Apply dark vignette gradient over photo
-        tempCtx.filter = 'none';
-        tempCtx.globalCompositeOperation = 'multiply';
-        tempCtx.globalAlpha = 0.45;
-        const vignette = tempCtx.createRadialGradient(
-          dx + (photoWidth / 2), dy + (photoHeight / 2), photoWidth * 0.4,
-          dx + (photoWidth / 2), dy + (photoHeight / 2), photoWidth * 0.85
-        );
-        vignette.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        vignette.addColorStop(0.6, 'rgba(200, 200, 200, 0.8)');
-        vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        tempCtx.fillStyle = vignette;
-        tempCtx.fillRect(dx, dy, photoWidth, photoHeight);
-        tempCtx.globalCompositeOperation = 'source-over';
-        tempCtx.globalAlpha = 1.0;
-
-        // Apply static noise grain overlay
-        if (grainDensity > 0) {
-          tempCtx.filter = 'none';
-          tempCtx.globalCompositeOperation = 'overlay';
-          tempCtx.globalAlpha = grainDensity / 150;
-          
-          const tileSize = 150;
-          const noiseCanvas = document.createElement('canvas');
-          noiseCanvas.width = tileSize;
-          noiseCanvas.height = tileSize;
-          const noiseCtx = noiseCanvas.getContext('2d');
-          if (noiseCtx) {
-            const noiseImg = noiseCtx.createImageData(tileSize, tileSize);
-            for (let i = 0; i < noiseImg.data.length; i += 4) {
-              const val = Math.floor(Math.random() * 255);
-              noiseImg.data[i] = val;
-              noiseImg.data[i+1] = val;
-              noiseImg.data[i+2] = val;
-              noiseImg.data[i+3] = 255;
-            }
-            noiseCtx.putImageData(noiseImg, 0, 0);
-            tempCtx.fillStyle = tempCtx.createPattern(noiseCanvas, 'repeat') || '#fff';
-            tempCtx.save();
-            tempCtx.translate(dx, dy);
-            tempCtx.fillRect(0, 0, photoWidth, photoHeight);
-            tempCtx.restore();
-          }
-          tempCtx.globalCompositeOperation = 'source-over';
-          tempCtx.globalAlpha = 1.0;
-        }
-
-        // Apply orange light leak
-        if (lightLeakActive) {
-          tempCtx.filter = 'none';
-          tempCtx.globalCompositeOperation = 'screen';
-          const grad = tempCtx.createRadialGradient(
-            dx + (photoWidth * 0.15), dy + (photoHeight * 0.15), 5,
-            dx + (photoWidth * 0.2), dy + (photoHeight * 0.2), photoWidth * 0.65
-          );
-          grad.addColorStop(0, 'rgba(251, 146, 60, 0.45)');
-          grad.addColorStop(0.4, 'rgba(239, 68, 68, 0.18)');
-          grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          tempCtx.fillStyle = grad;
-          tempCtx.fillRect(dx, dy, photoWidth, photoHeight);
-          tempCtx.globalCompositeOperation = 'source-over';
+      gifshot.createGIF({
+        images: allFrames,
+        interval: 0.12, // 0.12s per frame (approx 8 frames per second) for smooth video playback
+        gifWidth: w,
+        gifHeight: h,
+        numWorkers: 2,
+      }, (obj: any) => {
+        setIsGeneratingMomentGif(false);
+        if (!obj.error) {
+          setMomentGifUrl(obj.image);
+          addLog('High-res Moment GIF created successfully.');
+        } else {
+          console.error('Timelapse Moment GIF failed:', obj.error);
+          addLog(`Error: Timelapse Moment GIF failed: ${obj.error}`);
         }
       });
-
-      compiledStrips.push(tempCanvas.toDataURL('image/jpeg', 0.7));
-    }
-
-    // Encode the 10 compiled full-size strips into a single animated Moment GIF
-    gifshot.createGIF({
-      images: compiledStrips,
-      interval: 0.14, // speed of the moment timelapse (approx 7 frames per second)
-      gifWidth: width,
-      gifHeight: height,
-      numWorkers: 2,
-    }, (obj: any) => {
+    };
+    firstImg.onerror = () => {
       setIsGeneratingMomentGif(false);
-      if (!obj.error) {
-        setMomentGifUrl(obj.image);
-        addLog('Timelapse 4-cut Moment GIF created successfully.');
-      } else {
-        console.error('Timelapse Moment GIF failed:', obj.error);
-        addLog(`Error: Timelapse Moment GIF failed: ${obj.error}`);
-      }
-    });
+    };
   };
 
   const stopCamera = () => {
@@ -607,6 +598,50 @@ export default function App() {
       setZoom(1);
     }
   }, [facingMode, zoom]);
+
+  // Kiosk Mode Auto-Reset on Inactivity
+  useEffect(() => {
+    // Only reset if we are on screens where the user might walk away (Layout select = 2, Wizard = 4, Printer/Final = 5, Gallery = 6)
+    if (step === 1 || step === 3) return;
+
+    // Timeout duration: 60s for layout selection/printer/gallery, 120s for customization wizard
+    const timeoutDuration = (step === 4) ? 120000 : 60000;
+    
+    let timer: any;
+
+    const resetToHome = () => {
+      addLog(`Kiosk auto-reset triggered after ${timeoutDuration / 1000}s of inactivity.`);
+      setStep(1);
+      setGroupName('');
+      setCapturedPhotos([]);
+      setGifDataUrl('');
+      setMomentGifUrl('');
+      setUploadDone(false);
+      setServerFolderName('');
+      setGalleryFiles([]);
+    };
+
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(resetToHome, timeoutDuration);
+    };
+
+    // Initialize timer
+    resetTimer();
+
+    // Listen to all interaction events
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+    events.forEach(event => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    return () => {
+      clearTimeout(timer);
+      events.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [step]);
 
   // Capture sequence
   const startCaptureSequence = () => {
@@ -727,6 +762,55 @@ export default function App() {
     ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
   };
 
+  // Render organic simulated light leaks with seeded randomized positions per photo index
+  const drawLightLeak = (
+    ctx: CanvasRenderingContext2D,
+    dx: number,
+    dy: number,
+    photoWidth: number,
+    photoHeight: number,
+    idx: number
+  ) => {
+    if (lightLeakIntensity <= 0) return;
+
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'screen';
+
+    // Seeded offsets based on photo slot index to create dynamic organic variance
+    const xOffsets = [0.15, 0.85, 0.2, 0.75];
+    const yOffsets = [0.15, 0.2, 0.8, 0.75];
+    const rFactors = [0.65, 0.7, 0.6, 0.75];
+
+    const px = dx + (photoWidth * xOffsets[idx % xOffsets.length]);
+    const py = dy + (photoHeight * yOffsets[idx % yOffsets.length]);
+    const pr = photoWidth * rFactors[idx % rFactors.length];
+
+    const grad = ctx.createRadialGradient(px, py, 5, px, py, pr);
+    const alphaFactor = lightLeakIntensity / 100;
+
+    if (lightLeakStyle === 'warm') {
+      // Classic warm orange-red leak
+      grad.addColorStop(0, `rgba(251, 146, 60, ${0.5 * alphaFactor})`);
+      grad.addColorStop(0.4, `rgba(239, 68, 68, ${0.2 * alphaFactor})`);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    } else if (lightLeakStyle === 'magenta') {
+      // Rose magenta vintage leak
+      grad.addColorStop(0, `rgba(244, 63, 94, ${0.5 * alphaFactor})`);
+      grad.addColorStop(0.4, `rgba(168, 85, 247, ${0.22 * alphaFactor})`);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    } else {
+      // Spectrum prism leak
+      grad.addColorStop(0, `rgba(251, 191, 36, ${0.45 * alphaFactor})`); // Yellow
+      grad.addColorStop(0.3, `rgba(239, 68, 68, ${0.25 * alphaFactor})`); // Red
+      grad.addColorStop(0.6, `rgba(59, 130, 246, ${0.15 * alphaFactor})`); // Blue
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    }
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(dx, dy, photoWidth, photoHeight);
+    ctx.globalCompositeOperation = 'source-over';
+  };
+
   // Generate animated GIF loops from the captured photos (high resolution matching image aspect ratio)
   const generateAnimatedGif = () => {
     if (capturedPhotos.length === 0) return;
@@ -792,214 +876,314 @@ export default function App() {
     }
   }, [step, capturedPhotos, gifDataUrl]);
 
+  // Phase 4: Auto-upload when develop is done and GIFs are ready
+  useEffect(() => {
+    if (!isDeveloping && serverFolderName && !uploadDone && !isUploading && finalPhotoDataUrl) {
+      // Wait until GIF generation is also done (or failed) before uploading
+      if (!isGeneratingGif && !isGeneratingMomentGif) {
+        uploadToServer(serverFolderName);
+      }
+    }
+  }, [isDeveloping, isGeneratingGif, isGeneratingMomentGif, finalPhotoDataUrl, uploadDone]);
+
   // Compile photos onto a single template canvas
   useEffect(() => {
     if (step !== 4 && step !== 5) return;
     
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const total = selectedLayout === 'polaroid' ? 1 : 4;
-    // Fallback if no images were captured (e.g. testing)
-    const imagesToDraw = capturedPhotos.length >= total 
-      ? capturedPhotos 
-      : Array(total).fill('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="%23444"/></svg>');
-
-    // Canvas setup based on layout style
-    const scale = 3; // 3x upscale for high-resolution retina prints
-    let width = 0;
-    let height = 0;
-    let photoWidth = 0;
-    let photoHeight = 0;
-    let margin = 20 * scale;
-    let spacing = 15 * scale;
-    let bottomSpace = 80 * scale;
-
-    if (selectedLayout === '4cut') {
-      photoWidth = 360 * scale;
-      photoHeight = 270 * scale;
-      width = photoWidth + (margin * 2);
-      height = (photoHeight * 4) + (spacing * 3) + margin + bottomSpace;
-    } else if (selectedLayout === '2x2') {
-      photoWidth = 300 * scale;
-      photoHeight = 225 * scale;
-      width = (photoWidth * 2) + (margin * 2) + spacing;
-      height = (photoHeight * 2) + margin + spacing + bottomSpace;
-    } else { // polaroid
-      photoWidth = 360 * scale;
-      photoHeight = 360 * scale; // square format
-      width = photoWidth + (margin * 2);
-      height = photoHeight + margin + bottomSpace + (20 * scale);
+    // Show loading modal when transitioning to step 5 (Printer room compilation) OR when changing filters in wizardStep 1
+    const showLoader = (step === 5 || (step === 4 && wizardStep === 1));
+    if (showLoader) {
+      setIsProcessingFilters(true);
+      setFilterProgress(0);
     }
-
-    canvas.width = width;
-    canvas.height = height;
-
-    // Fill background frame color
-    ctx.fillStyle = frameColor;
-    ctx.fillRect(0, 0, width, height);
-
-    // Apply color filters (enhanced for retro CCD & Film vibes)
-    let filterString = 'none';
-    if (selectedFilter === 'ixy') {
-      // Canon IXY CCD digicam: slightly overexposed warm glow, high saturation, sharp highlights
-      filterString = 'contrast(1.15) brightness(1.08) saturate(1.22) sepia(0.08) hue-rotate(-6deg)';
-    } else if (selectedFilter === 'gold') {
-      // Kodak Gold 200: Warm golden-yellow tones, high warm contrast
-      filterString = 'contrast(0.98) brightness(1.04) saturate(1.38) sepia(0.3) hue-rotate(2deg)';
-    } else if (selectedFilter === 'fuji') {
-      // Fujifilm Superia: Cool greens/blues, soft highlight roll-off
-      filterString = 'contrast(1.02) brightness(1.02) saturate(0.95) sepia(0.08) hue-rotate(18deg)';
-    } else if (selectedFilter === 'instax') {
-      // Instax Polaroid: Faded washed-out shadows, high brights, warm tint
-      filterString = 'contrast(0.85) brightness(1.08) saturate(0.88) sepia(0.18)';
-    } else if (selectedFilter === 'trix') {
-      // B&W film: High contrast black and white
-      filterString = 'grayscale(1) contrast(1.4) brightness(0.92)';
-    }
-
-    // Load and draw photos
-    let loadedCount = 0;
-    const drawAll = () => {
-      // Draw Signature Text in handwritten Caveat font
-      if (showSignature) {
-        const displaySig = signatureText.trim();
-        if (displaySig) {
-          ctx.filter = 'none';
-          ctx.fillStyle = selectedFrameIsDark() ? '#ffffff' : '#1c1917';
-          ctx.font = `bold ${30 * scale}px 'Caveat', cursive`;
-          ctx.textAlign = 'center';
-          
-          const sigY = height - (38 * scale);
-          ctx.fillText(displaySig, width / 2, sigY);
-        }
+    
+    const timer = setTimeout(() => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        setIsProcessingFilters(false);
+        return;
       }
 
-      // Load Soundtrack QR if URL is provided
-      if (soundtrackUrl.trim()) {
-        const qrSize = 55 * scale;
-        const qrX = width - qrSize - (16 * scale);
-        const qrY = height - qrSize - (16 * scale);
-        const qrImg = new Image();
-        qrImg.crossOrigin = 'anonymous';
-        qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(soundtrackUrl)}`;
-        qrImg.onload = () => {
-          ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-          setFinalPhotoDataUrl(canvas.toDataURL('image/png'));
-        };
-        qrImg.onerror = () => {
-          // Draw generic placeholder QR on error
-          ctx.fillStyle = '#888';
-          ctx.fillRect(qrX, qrY, qrSize, qrSize);
-          setFinalPhotoDataUrl(canvas.toDataURL('image/png'));
-        };
-      } else {
-        setFinalPhotoDataUrl(canvas.toDataURL('image/png'));
+      const total = selectedLayout === 'polaroid' ? 1 : 4;
+      // Fallback if no images were captured (e.g. testing)
+      const imagesToDraw = capturedPhotos.length >= total 
+        ? capturedPhotos 
+        : Array(total).fill('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="%23444"/></svg>');
+
+      // Canvas setup based on layout style
+      const scale = 3; // 3x upscale for high-resolution retina prints
+      let width = 0;
+      let height = 0;
+      let photoWidth = 0;
+      let photoHeight = 0;
+      let margin = 20 * scale;
+      let spacing = 15 * scale;
+      let bottomSpace = 80 * scale;
+
+      if (selectedLayout === '4cut') {
+        photoWidth = 360 * scale;
+        photoHeight = 270 * scale;
+        width = photoWidth + (margin * 2);
+        height = (photoHeight * 4) + (spacing * 3) + margin + bottomSpace;
+      } else if (selectedLayout === '2x2') {
+        photoWidth = 300 * scale;
+        photoHeight = 225 * scale;
+        width = (photoWidth * 2) + (margin * 2) + spacing;
+        height = (photoHeight * 2) + margin + spacing + bottomSpace;
+      } else { // polaroid
+        photoWidth = 360 * scale;
+        photoHeight = 360 * scale; // square format
+        width = photoWidth + (margin * 2);
+        height = photoHeight + margin + bottomSpace + (20 * scale);
       }
-    };
 
-    imagesToDraw.forEach((src, idx) => {
-      const img = new Image();
-      img.src = src;
-      img.onload = () => {
-        ctx.filter = filterString;
-        
-        let dx = 0, dy = 0;
-        if (selectedLayout === '4cut') {
-          dx = margin;
-          dy = margin + (idx * (photoHeight + spacing));
-        } else if (selectedLayout === '2x2') {
-          const col = idx % 2;
-          const row = Math.floor(idx / 2);
-          dx = margin + (col * (photoWidth + spacing));
-          dy = margin + (row * (photoHeight + spacing));
-        } else { // polaroid
-          dx = margin;
-          dy = margin;
-        }
+      canvas.width = width;
+      canvas.height = height;
 
-        // Draw image frame using aspect-ratio cover to prevent stretching
-        drawImageCover(ctx, img, dx, dy, photoWidth, photoHeight);
+      // Fill background frame color
+      ctx.fillStyle = frameColor;
+      ctx.fillRect(0, 0, width, height);
 
-        // Apply dark vignette gradient over the photo for raw vintage lens feeling
-        ctx.filter = 'none';
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.globalAlpha = 0.45;
-        const vignette = ctx.createRadialGradient(
-          dx + (photoWidth / 2), dy + (photoHeight / 2), photoWidth * 0.4,
-          dx + (photoWidth / 2), dy + (photoHeight / 2), photoWidth * 0.85
-        );
-        vignette.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        vignette.addColorStop(0.6, 'rgba(200, 200, 200, 0.8)');
-        vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = vignette;
-        ctx.fillRect(dx, dy, photoWidth, photoHeight);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1.0;
+      // Apply color filters (enhanced for retro CCD & Film vibes)
+      let filterString = 'none';
+      if (selectedFilter === 'ixy') {
+        // Canon IXY CCD digicam: slightly overexposed warm glow, high saturation, sharp highlights
+        filterString = 'contrast(1.15) brightness(1.08) saturate(1.22) sepia(0.08) hue-rotate(-6deg)';
+      } else if (selectedFilter === 'gold') {
+        // Kodak Gold 200: Warm golden-yellow tones, high warm contrast
+        filterString = 'contrast(0.98) brightness(1.04) saturate(1.38) sepia(0.3) hue-rotate(2deg)';
+      } else if (selectedFilter === 'fuji') {
+        // Fujifilm Superia: Cool greens/blues, soft highlight roll-off
+        filterString = 'contrast(1.02) brightness(1.02) saturate(0.95) sepia(0.08) hue-rotate(18deg)';
+      } else if (selectedFilter === 'instax') {
+        // Instax Polaroid: Faded washed-out shadows, high brights, warm tint
+        filterString = 'contrast(0.85) brightness(1.08) saturate(0.88) sepia(0.18)';
+      } else if (selectedFilter === 'trix') {
+        // B&W film: High contrast black and white
+        filterString = 'grayscale(1) contrast(1.4) brightness(0.92)';
+      }
 
-        // Draw animated noise/grain overlay on photo itself (using fast tiled method)
-        if (grainDensity > 0) {
-          ctx.filter = 'none';
-          ctx.globalCompositeOperation = 'overlay';
-          ctx.globalAlpha = grainDensity / 150;
-          
-          // Render raw pixel noise on 150x150 tile
-          const tileSize = 150;
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = tileSize;
-          tempCanvas.height = tileSize;
-          const tempCtx = tempCanvas.getContext('2d');
-          if (tempCtx) {
-            const noiseImg = tempCtx.createImageData(tileSize, tileSize);
-            for (let i = 0; i < noiseImg.data.length; i += 4) {
-              const val = Math.floor(Math.random() * 255);
-              noiseImg.data[i] = val;
-              noiseImg.data[i+1] = val;
-              noiseImg.data[i+2] = val;
-              noiseImg.data[i+3] = 255;
-            }
-            tempCtx.putImageData(noiseImg, 0, 0);
+      // Load and draw photos
+      let loadedCount = 0;
+      const drawAll = () => {
+        // Draw Signature Text in handwritten Caveat font
+        if (showSignature) {
+          const displaySig = signatureText.trim();
+          if (displaySig) {
+            ctx.filter = 'none';
+            ctx.fillStyle = selectedFrameIsDark() ? '#ffffff' : '#1c1917';
+            ctx.font = `bold ${30 * scale}px 'Caveat', cursive`;
+            ctx.textAlign = 'center';
             
-            // Tile the noise over the photo
-            ctx.fillStyle = ctx.createPattern(tempCanvas, 'repeat') || '#fff';
-            ctx.save();
-            ctx.translate(dx, dy);
-            ctx.fillRect(0, 0, photoWidth, photoHeight);
-            ctx.restore();
+            const sigY = height - (38 * scale);
+            ctx.fillText(displaySig, width / 2, sigY);
           }
-          
-          // Reset composite/alpha
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = 1.0;
         }
 
-        // Draw light leak gradient
-        if (lightLeakActive) {
+        // Helper: finalize canvas — draw custom frame overlay then export
+        const finalizeCanvas = () => {
+          if (customFrameDataUrl) {
+            const frameImg = new Image();
+            frameImg.onload = () => {
+              ctx.filter = 'none';
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.globalAlpha = 1.0;
+              ctx.drawImage(frameImg, 0, 0, width, height);
+              if (soundtrackUrl.trim()) {
+                loadQrAndFinish();
+              } else {
+                setFinalPhotoDataUrl(canvas.toDataURL('image/png'));
+                setIsProcessingFilters(false);
+              }
+            };
+            frameImg.onerror = () => {
+              // Frame failed to load — still export without it
+              if (soundtrackUrl.trim()) { loadQrAndFinish(); }
+              else { 
+                setFinalPhotoDataUrl(canvas.toDataURL('image/png')); 
+                setIsProcessingFilters(false);
+              }
+            };
+            frameImg.src = customFrameDataUrl;
+          } else {
+            if (soundtrackUrl.trim()) { loadQrAndFinish(); }
+            else { 
+              setFinalPhotoDataUrl(canvas.toDataURL('image/png')); 
+              setIsProcessingFilters(false);
+            }
+          }
+        };
+
+        // Helper: load QR then export
+        const loadQrAndFinish = () => {
+          const qrSize = 55 * scale;
+          const qrX = width - qrSize - (16 * scale);
+          const qrY = height - qrSize - (16 * scale);
+          const qrImg = new Image();
+          qrImg.crossOrigin = 'anonymous';
+          qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(soundtrackUrl)}`;
+          qrImg.onload = () => {
+            ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+            setFinalPhotoDataUrl(canvas.toDataURL('image/png'));
+            setIsProcessingFilters(false);
+          };
+          qrImg.onerror = () => {
+            ctx.fillStyle = '#888';
+            ctx.fillRect(qrX, qrY, qrSize, qrSize);
+            setFinalPhotoDataUrl(canvas.toDataURL('image/png'));
+            setIsProcessingFilters(false);
+          };
+        };
+
+        finalizeCanvas();
+      };
+
+      imagesToDraw.forEach((src, idx) => {
+        const img = new Image();
+        img.src = src;
+        img.onload = async () => {
+          let dx = 0, dy = 0;
+          if (selectedLayout === '4cut') {
+            dx = margin;
+            dy = margin + (idx * (photoHeight + spacing));
+          } else if (selectedLayout === '2x2') {
+            const col = idx % 2;
+            const row = Math.floor(idx / 2);
+            dx = margin + (col * (photoWidth + spacing));
+            dy = margin + (row * (photoHeight + spacing));
+          } else { // polaroid
+            dx = margin;
+            dy = margin;
+          }
+
+          let processedByAi = false;
+          
+          if (isAiConnected && selectedFilter !== 'original') {
+            try {
+              const resp = await fetch('/api/process-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: src, filter: selectedFilter })
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data.success && data.image) {
+                  const aiImg = new Image();
+                  await new Promise((resolve, reject) => {
+                    aiImg.onload = resolve;
+                    aiImg.onerror = reject;
+                    aiImg.src = data.image;
+                  });
+                  drawImageCover(ctx, aiImg, dx, dy, photoWidth, photoHeight);
+                  processedByAi = true;
+                }
+              }
+            } catch (err) {
+              console.warn("AI processing failed, falling back to local JS:", err);
+            }
+          }
+
+          if (!processedByAi) {
+            // Create offscreen canvas for color transfer processing
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = photoWidth;
+            offCanvas.height = photoHeight;
+            const offCtx = offCanvas.getContext('2d');
+            if (offCtx) {
+              // Draw image cover style onto offscreen canvas
+              drawImageCover(offCtx, img, 0, 0, photoWidth, photoHeight);
+
+              // Get stats and apply Reinhard LAB color transfer
+              const stats = await getTargetStats(selectedFilter);
+              if (stats) {
+                const imgData = offCtx.getImageData(0, 0, photoWidth, photoHeight);
+                applyColorTransfer(imgData, stats);
+                offCtx.putImageData(imgData, 0, 0);
+              } else if (selectedFilter !== 'original') {
+                // CSS filter fallback if stats loading failed
+                offCtx.clearRect(0, 0, photoWidth, photoHeight);
+                offCtx.filter = filterString;
+                drawImageCover(offCtx, img, 0, 0, photoWidth, photoHeight);
+                offCtx.filter = 'none';
+              }
+
+              // Draw the processed offscreen canvas onto the main template canvas
+              ctx.drawImage(offCanvas, dx, dy);
+            } else {
+              // Fallback: draw directly to main canvas if offscreen canvas context fails
+              ctx.filter = filterString;
+              drawImageCover(ctx, img, dx, dy, photoWidth, photoHeight);
+            }
+          }
+
+          // Apply dark vignette gradient over the photo for raw vintage lens feeling
           ctx.filter = 'none';
-          ctx.globalCompositeOperation = 'screen';
-          
-          const grad = ctx.createRadialGradient(
-            dx + (photoWidth * 0.15), dy + (photoHeight * 0.15), 5,
-            dx + (photoWidth * 0.2), dy + (photoHeight * 0.2), photoWidth * 0.65
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = 0.45;
+          const vignette = ctx.createRadialGradient(
+            dx + (photoWidth / 2), dy + (photoHeight / 2), photoWidth * 0.4,
+            dx + (photoWidth / 2), dy + (photoHeight / 2), photoWidth * 0.85
           );
-          grad.addColorStop(0, 'rgba(251, 146, 60, 0.45)');
-          grad.addColorStop(0.4, 'rgba(239, 68, 68, 0.18)');
-          grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          
-          ctx.fillStyle = grad;
+          vignette.addColorStop(0, 'rgba(255, 255, 255, 1)');
+          vignette.addColorStop(0.6, 'rgba(200, 200, 200, 0.8)');
+          vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = vignette;
           ctx.fillRect(dx, dy, photoWidth, photoHeight);
           ctx.globalCompositeOperation = 'source-over';
-        }
+          ctx.globalAlpha = 1.0;
 
-        loadedCount++;
-        if (loadedCount === total) {
-          drawAll();
-        }
-      };
-    });
+          // Draw animated noise/grain overlay on photo itself (using fast tiled method)
+          if (grainDensity > 0) {
+            ctx.filter = 'none';
+            ctx.globalCompositeOperation = 'overlay';
+            ctx.globalAlpha = grainDensity / 150;
+            
+            // Render raw pixel noise on 150x150 tile
+            const tileSize = 150;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = tileSize;
+            tempCanvas.height = tileSize;
+            const tempCtx = tempCanvas.getContext('2d');
+            if (tempCtx) {
+              const noiseImg = tempCtx.createImageData(tileSize, tileSize);
+              for (let i = 0; i < noiseImg.data.length; i += 4) {
+                const val = Math.floor(Math.random() * 255);
+                noiseImg.data[i] = val;
+                noiseImg.data[i+1] = val;
+                noiseImg.data[i+2] = val;
+                noiseImg.data[i+3] = 255;
+              }
+              tempCtx.putImageData(noiseImg, 0, 0);
+              
+              // Tile the noise over the photo
+              ctx.fillStyle = ctx.createPattern(tempCanvas, 'repeat') || '#fff';
+              ctx.save();
+              ctx.translate(dx, dy);
+              ctx.fillRect(0, 0, photoWidth, photoHeight);
+              ctx.restore();
+            }
+            
+            // Reset composite/alpha
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1.0;
+          }
 
-  }, [step, wizardStep, selectedLayout, selectedFilter, grainDensity, lightLeakActive, frameColor, signatureText, showSignature, soundtrackUrl, capturedPhotos]);
+          // Draw organic simulated light leak
+          drawLightLeak(ctx, dx, dy, photoWidth, photoHeight, idx);
+
+          loadedCount++;
+          setFilterProgress(Math.round((loadedCount / total) * 100));
+          if (loadedCount === total) {
+            drawAll();
+          }
+        };
+      });
+    }, 150);
+
+    return () => clearTimeout(timer);
+
+  }, [step, wizardStep, selectedLayout, selectedFilter, grainDensity, lightLeakIntensity, lightLeakStyle, frameColor, signatureText, showSignature, soundtrackUrl, capturedPhotos, customFrameDataUrl]);
 
   const selectedFrameIsDark = () => {
     return frameColor === '#121212';
@@ -1032,6 +1216,8 @@ export default function App() {
           isDraggingRef.current = false;
           playBeep(900, 0.35); // success ding sound
           addLog('Photo development completed.');
+          // Phase 4: Trigger auto-upload after developing completes
+          setUploadDone(false);
         }
         return next;
       });
@@ -1233,12 +1419,22 @@ export default function App() {
               <div className="w-full bg-white border-2 border-stone-900 rounded-3xl p-4 sm:p-6 card-shadow flex flex-col gap-5 relative">
                 
                 {/* Visual Viewport Screen */}
-                <div className="aspect-video w-full border-2 border-stone-900 rounded-2xl relative overflow-hidden bg-stone-950 flex flex-col justify-between p-4 scanlines">
+                <div 
+                  className="w-full border-2 border-stone-900 rounded-2xl relative overflow-hidden bg-stone-950 flex flex-col justify-between p-4 scanlines transition-all duration-300 max-w-lg mx-auto"
+                  style={{
+                    aspectRatio: selectedLayout === 'polaroid' ? '1 / 1' : '4 / 3'
+                  }}
+                >
                   
                   {/* Camera Stream Element */}
                   {cameraPermission === 'granted' ? (
                     <video 
-                      ref={videoRef}
+                      ref={(el) => {
+                        videoRef.current = el;
+                        if (el && streamRef.current && el.srcObject !== streamRef.current) {
+                          el.srcObject = streamRef.current;
+                        }
+                      }}
                       autoPlay 
                       playsInline
                       className="absolute inset-0 w-full h-full object-cover pointer-events-none"
@@ -1491,11 +1687,11 @@ export default function App() {
                       <div className="grid grid-cols-2 gap-2">
                         {[
                           { id: 'original', label: 'Original', desc: 'สีธรรมชาติเดิมๆ' },
-                          { id: 'ixy', label: 'Canon IXY', desc: 'สีอมชมพู สไตล์กล้อง Y2K CCD' },
-                          { id: 'gold', label: 'Kodak Gold', desc: 'ฟิล์มสีส้มทองอบอุ่น' },
-                          { id: 'fuji', label: 'Fuji Superia', desc: 'ฟิล์มสีโทนเย็น อมฟ้า-เขียว' },
-                          { id: 'instax', label: 'Instax Polaroid', desc: 'สีซีดจาง คลาสสิกโพลารอยด์' },
-                          { id: 'trix', label: 'Tri-X 400', desc: 'ขาวดำ คอนทราสต์ดุเดือด' }
+                          { id: 'ixy', label: 'Retro Y2K', desc: 'โทนสีสว่างอมส้มชมพู สไตล์กล้องดิจิตอลเก่า' },
+                          { id: 'gold', label: 'Vintage Warm', desc: 'โทนฟิล์มอุ่นส้มอมทองสไตล์วินเทจ' },
+                          { id: 'fuji', label: 'Japanese Cool', desc: 'โทนสีเย็น อมฟ้าเขียวสไตล์มินิมอลญี่ปุ่น' },
+                          { id: 'instax', label: 'Faded Polaroid', desc: 'โทนสีโพลารอยด์ขุ่นจาง คลาสสิกวินเทจ' },
+                          { id: 'trix', label: 'Noir Monochrome', desc: 'โทนสีขาวดำ คอนทราสต์จัดเข้มดุดัน' }
                         ].map((filter) => (
                           <button
                             key={filter.id}
@@ -1534,26 +1730,50 @@ export default function App() {
                         <span className="text-[10px] text-stone-400 font-medium">ความหนาแน่นและเม็ดสไลด์ทรายฟิล์มบนภาพ</span>
                       </div>
 
-                      {/* Light Leak Toggle */}
-                      <div className="flex justify-between items-center p-4 rounded-2xl border-2 border-stone-200 bg-stone-50/50">
-                        <div>
-                          <p className="text-sm font-extrabold text-stone-900 flex items-center gap-1.5 font-heading">
-                            <Sparkles className="w-4 h-4 text-orange-500 fill-orange-500" />
-                            แสงรั่วจำลอง (Light Leaks Overlay)
-                          </p>
-                          <p className="text-[10px] text-stone-400 font-medium">สาดแสงสีส้มแดงพาดเฉียงจำลองแดดพาดเลนส์</p>
+                      {/* Light Leak Intensity Slider */}
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-center text-xs font-mono font-bold uppercase tracking-wider text-stone-400">
+                          <span>ความเข้มแสงรั่ว (Light Leak Intensity)</span>
+                          <span className="text-stone-900 font-extrabold">{lightLeakIntensity}%</span>
                         </div>
-                        <button
-                          onClick={() => setLightLeakActive(!lightLeakActive)}
-                          className={`w-12 h-6 rounded-full p-1 transition-all cursor-pointer ${
-                            lightLeakActive ? 'bg-stone-950' : 'bg-stone-200'
-                          }`}
-                        >
-                          <div className={`w-4 h-4 rounded-full bg-white transition-all transform ${
-                            lightLeakActive ? 'translate-x-6' : 'translate-x-0'
-                          }`} />
-                        </button>
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max="100" 
+                          value={lightLeakIntensity}
+                          onChange={(e) => setLightLeakIntensity(parseInt(e.target.value))}
+                          className="w-full h-2 bg-stone-100 border border-stone-200 rounded-lg appearance-none cursor-pointer accent-stone-900"
+                        />
+                        <span className="text-[10px] text-stone-400 font-medium">ความจาง/เข้มของแสงแดดพาดเลนส์จำลอง (0% คือปิด)</span>
                       </div>
+
+                      {/* Light Leak Style Selector */}
+                      {lightLeakIntensity > 0 && (
+                        <div className="flex flex-col gap-2.5">
+                          <span className="text-xs font-mono font-bold text-stone-400 uppercase">สไตล์เฉดแสงรั่ว (LIGHT LEAK STYLE)</span>
+                          <div className="grid grid-cols-3 gap-2">
+                            {[
+                              { id: 'warm', label: 'Warm Retro', desc: 'ส้มแดงแดดบ่าย' },
+                              { id: 'magenta', label: 'Rose Violet', desc: 'ชมพูม่วงนีออน' },
+                              { id: 'prism', label: 'Rainbow Prism', desc: 'ปริซึมสายรุ้ง' }
+                            ].map((style) => (
+                              <button
+                                key={style.id}
+                                type="button"
+                                onClick={() => setLightLeakStyle(style.id as any)}
+                                className={`p-2.5 rounded-xl border-2 text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                  lightLeakStyle === style.id 
+                                    ? 'border-stone-950 bg-stone-950 text-white' 
+                                    : 'border-stone-200 bg-stone-50/50 hover:bg-stone-50'
+                                }`}
+                              >
+                                <span className="text-xs font-extrabold font-heading">{style.label}</span>
+                                <span className={`text-[9px] ${lightLeakStyle === style.id ? 'text-stone-300' : 'text-stone-400'} font-medium`}>{style.desc}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1584,6 +1804,58 @@ export default function App() {
                             </button>
                           ))}
                         </div>
+                      </div>
+
+                      {/* Custom frame PNG upload */}
+                      <div className="flex flex-col gap-2.5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-mono font-bold text-stone-400 uppercase">กรอบที่ออกแบบเอง (CUSTOM FRAME)</span>
+                          {customFrameDataUrl && (
+                            <button
+                              onClick={clearCustomFrame}
+                              className="text-[10px] font-bold text-red-400 hover:text-red-600 transition-all cursor-pointer flex items-center gap-1"
+                            >
+                              <X className="w-3 h-3" /> ลบกรอบ
+                            </button>
+                          )}
+                        </div>
+
+                        {customFrameDataUrl ? (
+                          <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-400 bg-emerald-50">
+                            <img
+                              src={customFrameDataUrl}
+                              alt="Custom frame preview"
+                              className="w-full max-h-36 object-contain p-2"
+                            />
+                            <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              ใช้งานอยู่ ✓
+                            </div>
+                          </div>
+                        ) : (
+                          <label className="w-full py-4 border-2 border-dashed border-stone-300 hover:border-stone-950 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-stone-50/50 hover:bg-stone-50 group">
+                            <CloudUpload className="w-6 h-6 text-stone-400 group-hover:text-stone-900 transition-all" />
+                            <span className="text-xs font-bold text-stone-500 group-hover:text-stone-900 transition-all">อัปโหลดกรอบ PNG</span>
+                            <span className="text-[10px] text-stone-400 text-center px-4">PNG โปร่งใสเต็มขนาด canvas<br/>4cut: 1200×1815 | 2x2: 2010×1065 | Polaroid: 1200×1420</span>
+                            <input
+                              type="file"
+                              accept="image/png,image/webp,image/gif"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  const result = ev.target?.result as string;
+                                  if (result) saveCustomFrame(result);
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                        )}
+                        <span className="text-[10px] text-stone-400">
+                          กรอบจะถูกเก็บในอุปกรณ์นี้และใช้ซ้ำในการถ่ายครั้งต่อไปอัตโนมัติ
+                        </span>
                       </div>
 
                       {/* Signature input text */}
@@ -1662,7 +1934,22 @@ export default function App() {
 
                     {wizardStep < 4 ? (
                       <button
-                        onClick={() => setWizardStep((wizardStep + 1) as any)}
+                        onClick={() => {
+                          setIsProcessingFilters(true);
+                          setFilterProgress(0);
+                          let progress = 0;
+                          const interval = setInterval(() => {
+                            progress += 25;
+                            setFilterProgress(progress);
+                            if (progress >= 100) {
+                              clearInterval(interval);
+                              setTimeout(() => {
+                                setIsProcessingFilters(false);
+                                setWizardStep((wizardStep + 1) as any);
+                              }, 150);
+                            }
+                          }, 120);
+                        }}
                         className="flex-1 py-3 bg-stone-900 hover:bg-stone-800 text-white rounded-xl font-extrabold text-sm tracking-wide flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
                       >
                         ถัดไป
@@ -1802,6 +2089,39 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* Upload status badge */}
+                  {!isDeveloping && backendStatus === 'online' && (
+                    <div className={`w-full py-2.5 rounded-xl font-mono font-bold text-xs flex items-center justify-center gap-2 border-2 ${
+                      isUploading
+                        ? 'bg-blue-50 border-blue-200 text-blue-600 border-dashed'
+                        : uploadDone
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : 'bg-stone-50 border-stone-100 text-stone-400 border-dashed'
+                    }`}>
+                      {isUploading ? (
+                        <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> กำลังอัปโหลดขึ้น Server...</>
+                      ) : uploadDone ? (
+                        <><CloudUpload className="w-3.5 h-3.5" /> บันทึกลง Server เรียบร้อยแล้ว ✓</>
+                      ) : (
+                        <><CloudUpload className="w-3.5 h-3.5" /> รอการสร้าง GIF ก่อนอัปโหลด...</>
+                      )}
+                    </div>
+                  )}
+
+                  {/* View Gallery button */}
+                  {!isDeveloping && uploadDone && serverFolderName && (
+                    <button
+                      onClick={() => {
+                        fetchGallery(serverFolderName);
+                        setStep(6);
+                      }}
+                      className="w-full py-3.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl font-extrabold text-sm tracking-wide flex items-center justify-center gap-2 transition-all button-shadow cursor-pointer"
+                    >
+                      <Images className="w-5 h-5" />
+                      ดูรูปทั้งหมดของกลุ่ม (VIEW GALLERY)
+                    </button>
+                  )}
+
                   <button
                     onClick={() => {
                       setStep(1);
@@ -1809,6 +2129,8 @@ export default function App() {
                       setCapturedPhotos([]);
                       setGifDataUrl('');
                       setMomentGifUrl('');
+                      setUploadDone(false);
+                      setServerFolderName('');
                     }}
                     className={`w-full py-3.5 border-2 border-stone-200 hover:border-stone-950 text-stone-700 hover:text-stone-900 rounded-xl font-extrabold text-sm transition-all cursor-pointer ${
                       isDeveloping ? 'opacity-50 cursor-not-allowed hover:border-stone-200 text-stone-400' : ''
@@ -1823,8 +2145,140 @@ export default function App() {
             </motion.div>
           )}
 
+          {/* STEP 6: Gallery View */}
+          {step === 6 && (
+            <motion.div
+              key="step6"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.25 }}
+              className="w-full flex flex-col items-center"
+            >
+              <span className="text-xs sm:text-sm font-mono tracking-widest text-stone-400 uppercase mb-2.5 font-bold font-sans">GALLERY</span>
+              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight text-stone-900 text-center mb-1 leading-tight font-heading">
+                รูปของกลุ่มคุณ 📸
+              </h2>
+              <p className="text-xs sm:text-sm text-stone-500 font-medium text-center mb-6 max-w-sm">
+                {serverFolderName ? `Session: ${serverFolderName}` : 'ไม่พบข้อมูล session'}
+              </p>
+
+              <div className="w-full max-w-2xl bg-white border-2 border-stone-900 rounded-3xl p-5 sm:p-7 card-shadow flex flex-col gap-5">
+
+                {galleryLoading ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <RefreshCw className="w-8 h-8 animate-spin text-stone-400" />
+                    <span className="text-sm font-mono text-stone-400">กำลังโหลด Gallery...</span>
+                  </div>
+                ) : galleryFiles.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3 text-stone-400">
+                    <Images className="w-10 h-10" />
+                    <span className="text-sm font-mono">ยังไม่มีรูปใน Gallery</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {galleryFiles.map((file) => (
+                      <div
+                        key={file.fileName}
+                        className="relative group rounded-2xl overflow-hidden border-2 border-stone-100 hover:border-stone-950 transition-all cursor-pointer bg-stone-50"
+                        onClick={() => setLightboxUrl(file.url)}
+                      >
+                        <img
+                          src={file.url}
+                          alt={file.fileName}
+                          className="w-full aspect-[3/4] object-cover"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-stone-900/0 group-hover:bg-stone-900/30 transition-all flex items-center justify-center">
+                          <ZoomIn className="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition-all drop-shadow-lg" />
+                        </div>
+                        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-stone-900/70 to-transparent p-2">
+                          <span className="text-[10px] font-mono text-white/80 truncate block">
+                            {file.type === 'gif' ? '🎞️ GIF' : '📷 PNG'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => fetchGallery(serverFolderName)}
+                    className="w-full py-3 border-2 border-stone-200 hover:border-stone-900 text-stone-700 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    รีเฟรช Gallery
+                  </button>
+                  <button
+                    onClick={() => setStep(5)}
+                    className="w-full py-3.5 border-2 border-stone-200 hover:border-stone-950 text-stone-700 hover:text-stone-900 rounded-xl font-extrabold text-sm transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    กลับไปดาวน์โหลด
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStep(1);
+                      setGroupName('');
+                      setCapturedPhotos([]);
+                      setGifDataUrl('');
+                      setMomentGifUrl('');
+                      setUploadDone(false);
+                      setServerFolderName('');
+                      setGalleryFiles([]);
+                    }}
+                    className="w-full py-3.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl font-extrabold text-sm transition-all cursor-pointer"
+                  >
+                    ถ่ายใบถัดไป (NEW SHOT)
+                  </button>
+                </div>
+
+              </div>
+            </motion.div>
+          )}
+
         </AnimatePresence>
       </main>
+
+      {/* Film Developing Progress Overlay */}
+      {isProcessingFilters && (
+        <div className="fixed inset-0 bg-stone-900/80 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-6 select-none pointer-events-auto">
+          <div className="bg-white border-2 border-stone-900 rounded-3xl p-8 max-w-sm w-full card-shadow flex flex-col items-center gap-6">
+            <div className="relative w-16 h-16 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-stone-100" />
+              <div className="absolute inset-0 rounded-full border-4 border-stone-900 border-t-transparent animate-spin" />
+              <span className="text-xl font-bold font-mono text-stone-900">🎞️</span>
+            </div>
+            
+            <div className="text-center flex flex-col gap-2">
+              <h4 className="font-heading font-extrabold text-lg text-stone-900 tracking-wide">
+                กำลังพัฒนาสีและล้างฟิล์ม
+              </h4>
+              <p className="text-xs font-mono text-stone-450 uppercase">
+                Developing & Color Grading via {isAiConnected ? 'Python AI' : 'Local Engine'}
+              </p>
+            </div>
+
+            <div className="w-full flex flex-col gap-2">
+              <div className="flex justify-between text-[10px] font-mono font-bold text-stone-400">
+                <span>PROGRESS</span>
+                <span>{filterProgress}%</span>
+              </div>
+              <div className="w-full h-3.5 bg-stone-100 border-2 border-stone-900 rounded-full overflow-hidden p-0.5">
+                <div 
+                  className="h-full bg-stone-900 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${filterProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <p className="text-[10px] font-mono text-amber-600 font-bold text-center animate-pulse">
+              ⚠️ ห้ามปิดหน้านี้หรือกดปุ่มใดๆ ในระหว่างประมวลผล
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Footer copyright */}
       <footer className="w-full text-center py-4 text-xs font-mono text-stone-450 z-10 border-t border-stone-100 max-w-5xl mx-auto">
@@ -1872,6 +2326,13 @@ export default function App() {
                       <span className="text-stone-455 font-bold">STATUS:</span>
                       <span className={`font-bold ${backendStatus === 'online' ? 'text-emerald-600' : 'text-stone-500'}`}>
                         {backendStatus === 'online' ? 'ONLINE (DOCKER)' : 'STANDALONE (OFFLINE)'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between">
+                      <span className="text-stone-455 font-bold">AI ENGINE:</span>
+                      <span className={`font-bold ${isAiConnected ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {isAiConnected ? 'ONLINE (PYTHON)' : 'OFFLINE (JS)'}
                       </span>
                     </div>
                     
@@ -1936,6 +2397,55 @@ export default function App() {
           </>
         )}
       </AnimatePresence>
+
+      {/* Phase 4: Lightbox fullscreen overlay */}
+      <AnimatePresence>
+        {lightboxUrl && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setLightboxUrl('')}
+              className="fixed inset-0 bg-stone-950/90 z-50 cursor-pointer backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={{ type: 'spring', damping: 24, stiffness: 200 }}
+              className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 pointer-events-none"
+            >
+              <div className="pointer-events-auto flex flex-col items-center gap-4 max-w-lg w-full">
+                <img
+                  src={lightboxUrl}
+                  alt="Gallery fullscreen"
+                  className="max-h-[75vh] max-w-full rounded-2xl shadow-2xl object-contain border-2 border-white/10"
+                />
+                <div className="flex gap-3 w-full">
+                  <a
+                    href={lightboxUrl}
+                    download
+                    className="flex-1 py-3 bg-white text-stone-900 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 hover:bg-stone-100 transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    ดาวน์โหลด
+                  </a>
+                  <button
+                    onClick={() => setLightboxUrl('')}
+                    className="flex-1 py-3 border-2 border-white/30 text-white rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 hover:bg-white/10 transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    ปิด
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
+
   );
 }
+
